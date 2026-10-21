@@ -43,6 +43,7 @@ blockierter Verbindungen über mehrere Standorte.
 
 **Regeln**
 - Alle Firewall-Regeln mit **Treffern, Bytes gesendet/empfangen und „zuletzt genutzt“**, berechnet aus den Logs
+- Regelgruppen als **aufklappbare Ordner** wie in der Sophos-Oberfläche (mit Summen je Ordner) oder als flache Liste, die Wahl wird pro Nutzer gemerkt
 - Kombinierbare Filter (Zonen, Netze, Dienste, „Any“, Aktion, Logging, Treffer, Alter) und Schnellfilter
 - Pro Regel: Verlauf, Top-Quellen/-Ziele/-Ports und ein **Nutzungsprofil**, das zeigt, was die Regel tatsächlich durchlässt
 
@@ -79,7 +80,7 @@ blockierter Verbindungen über mehrere Standorte.
 
 | | |
 |---|---|
-| **System**: Auslastung und Verlauf<br>![System](docs/screenshots/system.png) | **Regeln**: Nutzung und kombinierbare Filter<br>![Regeln](docs/screenshots/rules.png) |
+| **System**: Auslastung und Verlauf<br>![System](docs/screenshots/system.png) | **Regeln**: Ordner, Nutzung und kombinierbare Filter<br>![Regeln](docs/screenshots/rules.png) |
 | **Audit**: Befunde mit Akzeptanz<br>![Audit](docs/screenshots/audit.png) | **Zonen-Matrix**: Regeln je Zonenpaar<br>![Zonen-Matrix](docs/screenshots/zone-matrix.png) |
 | **Beziehungen**: alle Regeln zu einem Objekt<br>![Fokus-Graph](docs/screenshots/graph-focus.png) | **Änderungen**: Diff mit Verursacher<br>![Änderungen](docs/screenshots/changes.png) |
 | **Logs**: Filter per Klick und CIDR<br>![Logs](docs/screenshots/logs.png) | **Standortübergreifend**: wo fehlt die Regel?<br>![Standortübergreifend](docs/screenshots/cross-site.png) |

@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { Search, X } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen, FolderTree, List, Search, X } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { AddRuleFilter, matchRule, PRESETS, RuleFilterChip, type RuleFilter } from "@/components/RuleFilters";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { cn } from "@/lib/utils";
 import { TimeChart, type Row } from "../../components/TimeChart";
 import { Card, Empty, ErrorBox, Loading, Pill, RangeSelect } from "../../components/ui";
 import { api } from "../../lib/api";
@@ -28,6 +30,24 @@ function parseFilters(raw: string | null): RuleFilter[] {
 export function RulesTab({ fwId }: { fwId: number }) {
   const [hours, setHours] = useState(168);
   const [sort, setSort] = useState<SortKey>("position");
+  // Regelgruppen (Ordner in der Sophos-Oberfläche) als aufklappbare Abschnitte
+  // Ansicht pro Nutzer im Browser merken (Ordner oder flache Liste)
+  const [folders, setFoldersState] = useState(() => {
+    try {
+      return localStorage.getItem("rules.view") !== "flat";
+    } catch {
+      return true;
+    }
+  });
+  const setFolders = (v: boolean) => {
+    setFoldersState(v);
+    try {
+      localStorage.setItem("rules.view", v ? "folders" : "flat");
+    } catch {
+      /* Speicher nicht verfügbar – gilt dann nur für diese Sitzung */
+    }
+  };
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Suche und Filter in der URL – teilbar, bleiben beim Tab-Wechsel erhalten
   const [params, setParams] = useSearchParams();
   const search = params.get("rq") ?? "";
@@ -89,6 +109,122 @@ export function RulesTab({ fwId }: { fwId: number }) {
     </th>
   );
 
+  const grouped = folders;
+  const NO_FOLDER = "Ohne Ordner";
+  const segments: { group: string | null; rules: Rule[] }[] = [];
+  if (sort === "position") {
+    // Reihenfolge wie auf der Firewall: aufeinanderfolgende Regeln derselben Gruppe bilden einen Ordner
+    for (const r of rules) {
+      const last = segments.at(-1);
+      if (r.group && last && last.group === r.group) last.rules.push(r);
+      else segments.push({ group: r.group ?? null, rules: [r] });
+    }
+  } else {
+    // Nach Nutzung: innerhalb der Ordner sortiert, Ordner nach ihrer Summe; Regeln ohne Gruppe in "Ohne Ordner"
+    const byGroup = new Map<string, Rule[]>();
+    for (const r of rules) byGroup.set(r.group ?? NO_FOLDER, [...(byGroup.get(r.group ?? NO_FOLDER) ?? []), r]);
+    const score = (list: Rule[]) =>
+      sort === "hits"
+        ? list.reduce((a, r) => a + (r.usage?.hits ?? 0), 0)
+        : sort === "bytes"
+          ? list.reduce((a, r) => a + totalBytes(r), 0)
+          : Math.max(0, ...list.map((r) => (r.last_seen_ever ? new Date(r.last_seen_ever).getTime() : 0)));
+    for (const [group, list] of [...byGroup].sort((a, b) => score(b[1]) - score(a[1]))) segments.push({ group, rules: list });
+  }
+  const groupNames = [...new Set(segments.filter((g) => g.group).map((g) => g.group!))];
+  const toggleGroup = (g: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(g)) next.delete(g);
+      else next.add(g);
+      return next;
+    });
+
+  const renderRule = (r: Rule, nested: boolean) => (
+                  <Fragment key={`${r.group ?? ""}|${r.name}`}>
+                    <tr
+                      className={`cursor-pointer border-t border-border align-top hover:bg-muted ${r.enabled ? "" : "opacity-55"}`}
+                      onClick={() => setOpen(open === r.name ? null : r.name)}
+                    >
+                      <td className="px-3 py-2 text-muted-foreground">{r.position + 1}</td>
+                      <td className={cn("max-w-64 px-3 py-2", nested && "border-l-2 border-l-primary/40 pl-7")}>
+                        <div className="font-medium">{r.name}</div>
+                        <div className="flex flex-wrap gap-1 pt-0.5">
+                          {r.group && !nested && <Pill>{r.group}</Pill>}
+                          {!r.enabled && <Pill>deaktiviert</Pill>}
+                          {r.enabled && !r.log_traffic && <Pill>Logging aus</Pill>}
+                          {r.policy_type && r.policy_type !== "Network" && <Pill>{r.policy_type}</Pill>}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <Pill tone={r.action === "Accept" ? "good" : r.action ? "critical" : "neutral"}>{r.action ?? "–"}</Pill>
+                      </td>
+                      <td className="max-w-48 px-3 py-2 text-xs">
+                        <div>{list(r.source_zones)}</div>
+                        <div className="text-muted-foreground">{list(r.source_networks)}</div>
+                      </td>
+                      <td className="max-w-48 px-3 py-2 text-xs">
+                        <div>{list(r.destination_zones)}</div>
+                        <div className="text-muted-foreground">{list(r.destination_networks)}</div>
+                      </td>
+                      <td className="max-w-40 px-3 py-2 text-xs">{list(r.services)}</td>
+                      <td className="px-3 py-2 text-right font-medium">{fmtNumber(r.usage?.hits ?? 0)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right text-xs">
+                        {fmtBytes(r.usage?.sent_bytes ?? 0)} / {fmtBytes(r.usage?.recv_bytes ?? 0)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground" title={fmtDate(r.last_seen_ever)}>
+                        {r.last_seen_ever ? fmtRelative(r.last_seen_ever) : "nie (seit Erfassung)"}
+                      </td>
+                    </tr>
+                    {open === r.name && (
+                      <tr className="border-t border-border bg-muted">
+                        <td colSpan={9} className="p-3">
+                          {r.rule_id == null ? (
+                            <div className="text-sm text-muted-foreground/70">
+                              Für diese Regel wurden noch keine Logs empfangen – Nutzungsdetails erscheinen, sobald Traffic geloggt wird.
+                            </div>
+                          ) : (
+                            <RuleDetail fwId={fwId} ruleId={r.rule_id} hours={hours} />
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+  );
+
+  const renderSegment = (seg: { group: string | null; rules: Rule[] }, i: number) => {
+    if (!seg.group) return seg.rules.map((r) => renderRule(r, false));
+    const isOpen = !collapsed.has(seg.group);
+    const sum = (f: (r: Rule) => number) => seg.rules.reduce((a, r) => a + f(r), 0);
+    const last = seg.rules.map((r) => r.last_seen_ever).filter(Boolean).sort().at(-1);
+    const Icon = isOpen ? FolderOpen : Folder;
+    return (
+      <Fragment key={`seg-${seg.group}-${i}`}>
+        <tr className="cursor-pointer border-t border-border bg-muted/50 hover:bg-muted" onClick={() => toggleGroup(seg.group!)}>
+          <td className="px-3 py-2 text-muted-foreground">
+            <ChevronRight className={cn("size-4 transition-transform", isOpen && "rotate-90")} />
+          </td>
+          <td colSpan={5} className="px-3 py-2">
+            <span className="flex items-center gap-2 font-semibold">
+              <Icon className="size-4 text-primary" />
+              {seg.group}
+              <span className="text-xs font-normal text-muted-foreground">
+                {seg.rules.length} Regel{seg.rules.length === 1 ? "" : "n"}
+                {sort === "position" && ` · #${seg.rules[0].position + 1}–#${seg.rules.at(-1)!.position + 1}`}
+              </span>
+            </span>
+          </td>
+          <td className="px-3 py-2 text-right font-medium tabular-nums">{fmtNumber(sum((r) => r.usage?.hits ?? 0))}</td>
+          <td className="whitespace-nowrap px-3 py-2 text-right text-xs tabular-nums">
+            {fmtBytes(sum((r) => r.usage?.sent_bytes ?? 0))} / {fmtBytes(sum((r) => r.usage?.recv_bytes ?? 0))}
+          </td>
+          <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{last ? fmtRelative(last) : "nie"}</td>
+        </tr>
+        {isOpen && seg.rules.map((r) => renderRule(r, true))}
+      </Fragment>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -106,7 +242,35 @@ export function RulesTab({ fwId }: { fwId: number }) {
             {p.label}
           </Button>
         ))}
+        <div className="ml-auto flex items-center gap-2">
+          {grouped && groupNames.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setCollapsed(collapsed.size ? new Set() : new Set(groupNames))}
+            >
+              {collapsed.size ? "Alle Ordner aufklappen" : "Alle Ordner zuklappen"}
+            </Button>
+          )}
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            value={folders ? "folders" : "flat"}
+            onValueChange={(v) => {
+              if (!v) return;
+              setFolders(v === "folders");
+            }}
+          >
+            <ToggleGroupItem value="folders" className="px-2.5 text-xs"><FolderTree className="size-3.5" /> Ordner</ToggleGroupItem>
+            <ToggleGroupItem value="flat" className="px-2.5 text-xs"><List className="size-3.5" /> Flach</ToggleGroupItem>
+          </ToggleGroup>
+        </div>
       </div>
+      {folders && sort !== "position" && (
+        <p className="text-xs text-muted-foreground">Sortiert innerhalb der Ordner; Ordner nach ihrer Summe. Nach „#“ sortieren für die Reihenfolge der Firewall.</p>
+      )}
       {(filters.length > 0 || search) && (
         <div className="flex flex-wrap items-center gap-2">
           {filters.map((f, i) => (
@@ -146,57 +310,7 @@ export function RulesTab({ fwId }: { fwId: number }) {
               </tr>
             </thead>
             <tbody>
-              {rules.map((r) => (
-                <Fragment key={r.name}>
-                  <tr
-                    className={`cursor-pointer border-t border-border align-top hover:bg-muted ${r.enabled ? "" : "opacity-55"}`}
-                    onClick={() => setOpen(open === r.name ? null : r.name)}
-                  >
-                    <td className="px-3 py-2 text-muted-foreground">{r.position + 1}</td>
-                    <td className="max-w-64 px-3 py-2">
-                      <div className="font-medium">{r.name}</div>
-                      <div className="flex flex-wrap gap-1 pt-0.5">
-                        {r.group && <Pill>{r.group}</Pill>}
-                        {!r.enabled && <Pill>deaktiviert</Pill>}
-                        {r.enabled && !r.log_traffic && <Pill>Logging aus</Pill>}
-                        {r.policy_type && r.policy_type !== "Network" && <Pill>{r.policy_type}</Pill>}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <Pill tone={r.action === "Accept" ? "good" : r.action ? "critical" : "neutral"}>{r.action ?? "–"}</Pill>
-                    </td>
-                    <td className="max-w-48 px-3 py-2 text-xs">
-                      <div>{list(r.source_zones)}</div>
-                      <div className="text-muted-foreground">{list(r.source_networks)}</div>
-                    </td>
-                    <td className="max-w-48 px-3 py-2 text-xs">
-                      <div>{list(r.destination_zones)}</div>
-                      <div className="text-muted-foreground">{list(r.destination_networks)}</div>
-                    </td>
-                    <td className="max-w-40 px-3 py-2 text-xs">{list(r.services)}</td>
-                    <td className="px-3 py-2 text-right font-medium">{fmtNumber(r.usage?.hits ?? 0)}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right text-xs">
-                      {fmtBytes(r.usage?.sent_bytes ?? 0)} / {fmtBytes(r.usage?.recv_bytes ?? 0)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground" title={fmtDate(r.last_seen_ever)}>
-                      {r.last_seen_ever ? fmtRelative(r.last_seen_ever) : "nie (seit Erfassung)"}
-                    </td>
-                  </tr>
-                  {open === r.name && (
-                    <tr className="border-t border-border bg-muted">
-                      <td colSpan={9} className="p-3">
-                        {r.rule_id == null ? (
-                          <div className="text-sm text-muted-foreground/70">
-                            Für diese Regel wurden noch keine Logs empfangen – Nutzungsdetails erscheinen, sobald Traffic geloggt wird.
-                          </div>
-                        ) : (
-                          <RuleDetail fwId={fwId} ruleId={r.rule_id} hours={hours} />
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
+              {grouped ? segments.map(renderSegment) : rules.map((r) => renderRule(r, false))}
             </tbody>
           </table>
         </div>
