@@ -19,6 +19,7 @@ import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
+  Command,
   CommandDialog,
   CommandEmpty,
   CommandGroup,
@@ -123,6 +124,8 @@ function CommandMenu({ firewalls, isAdmin }: { firewalls: Firewall[]; isAdmin: b
         <kbd className="pointer-events-none hidden rounded border bg-muted px-1.5 font-mono text-[10px] sm:inline">Strg K</kbd>
       </Button>
       <CommandDialog open={open} onOpenChange={setOpen} title="Suche" description="Seiten und Firewalls">
+        {/* CommandDialog bringt keinen cmdk-Container mit – ohne <Command> stürzt die Liste ab */}
+        <Command>
         <CommandInput placeholder="Firewall, Seite oder Bereich …" />
         <CommandList>
           <CommandEmpty>Nichts gefunden.</CommandEmpty>
@@ -145,6 +148,7 @@ function CommandMenu({ firewalls, isAdmin }: { firewalls: Firewall[]; isAdmin: b
             </CommandGroup>
           ))}
         </CommandList>
+        </Command>
       </CommandDialog>
     </>
   );

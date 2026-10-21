@@ -1,5 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { Search, X } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
+import { useSearchParams } from "react-router";
+import { AddRuleFilter, matchRule, PRESETS, RuleFilterChip, type RuleFilter } from "@/components/RuleFilters";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { TimeChart, type Row } from "../../components/TimeChart";
 import { Card, Empty, ErrorBox, Loading, Pill, RangeSelect } from "../../components/ui";
 import { api } from "../../lib/api";
@@ -11,11 +16,40 @@ type SortKey = "position" | "hits" | "bytes" | "last_seen";
 const list = (items: string[], fallback = "Alle") => (items.length ? items.join(", ") : fallback);
 const totalBytes = (r: Rule) => (r.usage ? r.usage.sent_bytes + r.usage.recv_bytes : 0);
 
+function parseFilters(raw: string | null): RuleFilter[] {
+  try {
+    const v = raw ? JSON.parse(raw) : [];
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
 export function RulesTab({ fwId }: { fwId: number }) {
   const [hours, setHours] = useState(168);
-  const [search, setSearch] = useState("");
-  const [onlyUnused, setOnlyUnused] = useState(false);
   const [sort, setSort] = useState<SortKey>("position");
+  // Suche und Filter in der URL – teilbar, bleiben beim Tab-Wechsel erhalten
+  const [params, setParams] = useSearchParams();
+  const search = params.get("rq") ?? "";
+  const filters = useMemo(() => parseFilters(params.get("rf")), [params]);
+  const setUrl = (changes: Record<string, string | null>) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const [k, v] of Object.entries(changes)) {
+          if (v) next.set(k, v);
+          else next.delete(k);
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  const setFilters = (list: RuleFilter[]) => setUrl({ rf: list.length ? JSON.stringify(list) : null });
+  const addFilters = (list: RuleFilter[]) => {
+    const key = (f: RuleFilter) => `${f.field}|${f.op}|${f.value}`;
+    const have = new Set(filters.map(key));
+    setFilters([...filters, ...list.filter((f) => !have.has(key(f)))]);
+  };
   const [open, setOpen] = useState<string | null>(null);
 
   const q = useQuery({
@@ -33,13 +67,13 @@ export function RulesTab({ fwId }: { fwId: number }) {
           .some((v) => v?.toLowerCase().includes(s)),
       );
     }
-    if (onlyUnused) r = r.filter((x) => x.enabled && !x.usage?.hits);
+    for (const f of filters) r = r.filter((x) => matchRule(x, f));
     const sorted = [...r];
     if (sort === "hits") sorted.sort((a, b) => (b.usage?.hits ?? 0) - (a.usage?.hits ?? 0));
     if (sort === "bytes") sorted.sort((a, b) => totalBytes(b) - totalBytes(a));
     if (sort === "last_seen") sorted.sort((a, b) => (b.last_seen_ever ?? "").localeCompare(a.last_seen_ever ?? ""));
     return sorted;
-  }, [q.data, search, onlyUnused, sort]);
+  }, [q.data, search, filters, sort]);
 
   if (q.isPending) return <Loading />;
   if (q.error) return <ErrorBox error={q.error} />;
@@ -57,16 +91,35 @@ export function RulesTab({ fwId }: { fwId: number }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <input className="input w-64" placeholder="Regel, Zone, Netz, Dienst …" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <input type="checkbox" checked={onlyUnused} onChange={(e) => setOnlyUnused(e.target.checked)} />
-          Nur ungenutzte aktive Regeln
-        </label>
-        <div className="ml-auto">
-          <RangeSelect value={hours} onChange={setHours} />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-64 flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input className="pl-8" placeholder="Regel, Zone, Netz, Dienst …" value={search} onChange={(e) => setUrl({ rq: e.target.value || null })} />
         </div>
+        <AddRuleFilter rules={data.rules} onAdd={(f) => addFilters([f])} />
+        <RangeSelect value={hours} onChange={setHours} />
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Schnellfilter:</span>
+        {PRESETS.map((p) => (
+          <Button key={p.label} variant="outline" size="sm" className="h-7 text-xs" onClick={() => addFilters(p.filters)}>
+            {p.label}
+          </Button>
+        ))}
+      </div>
+      {(filters.length > 0 || search) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {filters.map((f, i) => (
+            <RuleFilterChip key={`${f.field}-${f.op}-${f.value}-${i}`} f={f} onRemove={() => setFilters(filters.filter((_, j) => j !== i))} />
+          ))}
+          <span className="text-xs text-muted-foreground">
+            {rules.length} von {data.rules.length} Regeln
+          </span>
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setUrl({ rf: null, rq: null })}>
+            <X /> Alle entfernen
+          </Button>
+        </div>
+      )}
 
       <div className="text-xs text-muted-foreground/70">
         Nutzungswerte werden aus den Firewall-Logs (Syslog) berechnet
