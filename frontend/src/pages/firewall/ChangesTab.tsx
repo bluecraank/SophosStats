@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { Clock, TriangleAlert, UserRound } from "lucide-react";
 import { DiffView } from "@/components/DiffView";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty, ErrorBox, Loading, Pill } from "../../components/ui";
 import { api } from "../../lib/api";
 import { fmtDate } from "../../lib/format";
@@ -20,13 +22,61 @@ export function changedKeys(oldVal: unknown, newVal: unknown): string[] {
 }
 
 export function Actors({ actors }: { actors: ChangeActor[] }) {
-  if (actors.length === 0) return null;
+  if (actors.length === 0) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground/70" title="Kein passendes Admin-Event im Syslog gefunden">
+        <UserRound className="size-3.5" /> Benutzer unbekannt
+      </span>
+    );
+  }
   const a = actors[actors.length - 1];
   return (
-    <span className="text-xs text-muted-foreground" title={actors.map((x) => `${fmtDate(x.time)}: ${x.message}`).join("\n")}>
-      von <strong className="text-foreground">{a.user ?? "?"}</strong>
+    <span
+      className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+      title={actors.map((x) => `${fmtDate(x.time)}: ${x.message}`).join("\n")}
+    >
+      <UserRound className="size-3.5" />
+      {a.exact ? "von" : "vermutlich von"} <strong className="text-foreground">{a.user ?? "?"}</strong>
       {a.src_ip && ` (${a.src_ip}${a.via ? `, ${a.via}` : ""})`}
     </span>
+  );
+}
+
+const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+
+/** Wann geändert: exakt aus dem Admin-Event, sonst das Zeitfenster zwischen zwei Abrufen. */
+export function ChangeTime({ c }: { c: ConfigChange }) {
+  const exact = c.actors.findLast((a) => a.exact);
+  let text: string;
+  if (exact) text = fmtDate(exact.time);
+  else if (c.window_start) {
+    const sameDay = new Date(c.window_start).toDateString() === new Date(c.time).toDateString();
+    text = sameDay
+      ? `${new Date(c.time).toLocaleDateString("de-DE")} zwischen ${fmtTime(c.window_start)} und ${fmtTime(c.time)}`
+      : `zwischen ${fmtDate(c.window_start)} und ${fmtDate(c.time)}`;
+  } else text = `bis ${fmtDate(c.time)}`;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title={`Erkannt beim Abruf ${fmtDate(c.time)}`}>
+      <Clock className="size-3.5" /> {text}
+    </span>
+  );
+}
+
+function AdminEventsHint({ fwId }: { fwId: number }) {
+  const q = useQuery({
+    queryKey: ["admin-events", fwId],
+    queryFn: () => api<{ count_7d: number; last_at: string | null }>(`/api/firewalls/${fwId}/admin-events/status`),
+  });
+  if (!q.data || q.data.count_7d > 0) return null;
+  return (
+    <Alert className="border-warning/40 bg-warning/5">
+      <TriangleAlert className="text-warning" />
+      <AlertTitle>Keine Admin-Events empfangen – Benutzer kann nicht ermittelt werden</AlertTitle>
+      <AlertDescription>
+        Auf der XGS unter <em>System services → Log settings</em> beim Syslog-Server die Kategorie{" "}
+        <strong>Events → Admin events</strong> aktivieren. Danach erscheint bei neuen Änderungen, wer sie wann vorgenommen hat.
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -64,19 +114,17 @@ function History({ fwId }: { fwId: number }) {
   }
   return (
     <div className="space-y-2">
+      <AdminEventsHint fwId={fwId} />
       {q.data.map((c, i) => (
         <details key={c.id} open={i === 0} className="rounded-md border border-border bg-card">
-          <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
-            <span
-              className="w-36 text-xs text-muted-foreground"
-              title={c.window_start ? `Geändert zwischen ${fmtDate(c.window_start)} und ${fmtDate(c.time)}` : undefined}
-            >
-              {fmtDate(c.time)}
-            </span>
+          <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5 text-sm">
             <Pill tone={actionTone(c.action)}>{ACTION_LABEL[c.action]}</Pill>
             <span className="text-muted-foreground">{c.entity_type}</span>
             <span className="font-medium">{c.name}</span>
-            <Actors actors={c.actors} />
+            <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1">
+              <ChangeTime c={c} />
+              <Actors actors={c.actors} />
+            </span>
           </summary>
           <ChangeDetails old={c.old} next={c.new} />
         </details>

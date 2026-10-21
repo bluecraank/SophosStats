@@ -122,6 +122,8 @@ export interface ChangeActor {
   src_ip: string | null;
   via: string | null;
   message: string;
+  /** true = Objektname steht in der Admin-Meldung; false = nur zeitlich passende Admin-Aktion */
+  exact: boolean;
 }
 
 export interface ConfigChange {

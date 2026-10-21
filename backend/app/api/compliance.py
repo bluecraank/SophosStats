@@ -1,5 +1,6 @@
 """Regel-Audit, Änderungsnachverfolgung, Konfigurationsvergleiche und Berichte."""
 
+import re
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -233,13 +234,45 @@ async def rule_profile(fw_id: int, rule_id: int, db: DB, _user: CurrentUser, hou
 # --- Änderungen: wer, wann, Stand am Datum ------------------------------------
 
 
+_ADMIN_COMPONENTS = ["GUI", "CLI", "API", "Console", "SSH", "Admin", "Central"]
+_CHANGE_WORDS = ("add", "modif", "delet", "chang", "updat", "creat", "remov", "edit", "appl")
+_BY = re.compile(r"\bby\s+'?([^'\s]+)'?", re.IGNORECASE)
+_FROM = re.compile(r"\bfrom\s+'?([0-9a-fA-F:.]+)'?", re.IGNORECASE)
+_USING = re.compile(r"\busing\s+'?([^'\s]+)'?", re.IGNORECASE)
+
+
 def _is_admin_log():
-    return or_(LogEntry.log_subtype.ilike("admin"), LogEntry.log_type.ilike("admin"))
+    """Admin-Events: je nach Firmware als Typ/Untertyp "Admin" oder als Event der Komponente GUI/CLI/API."""
+    return or_(
+        LogEntry.log_subtype.ilike("%admin%"),
+        LogEntry.log_type.ilike("%admin%"),
+        LogEntry.log_component.in_(_ADMIN_COMPONENTS),
+    )
+
+
+def _actor(log, exact: bool) -> dict:
+    """Benutzer/IP/Zugang aus den Logfeldern, ersatzweise aus dem Meldungstext
+    ("... was modified by 'admin' from '10.0.0.5' using 'GUI'")."""
+    msg = log.message or ""
+
+    def find(rx):
+        m = rx.search(msg)
+        return m.group(1) if m else None
+
+    return {
+        "time": log.time,
+        "user": log.user_name or find(_BY),
+        "src_ip": log.src_ip or find(_FROM),
+        "via": find(_USING) or log.log_component,
+        "message": msg,
+        "exact": exact,
+    }
 
 
 async def change_actors(db: DB, fw: Firewall, changes: list[ConfigChange]) -> dict[int, list[dict]]:
-    """Ordnet erkannten Änderungen Admin-Events aus dem Syslog zu: gleiches Zeitfenster
-    (seit dem vorherigen Abruf) und Objektname in der Meldung."""
+    """Ordnet erkannten Änderungen Admin-Events aus dem Syslog im selben Zeitfenster zu (seit dem vorherigen
+    Abruf). Exakt, wenn der Objektname in der Meldung steht – sonst die Änderungsaktionen im Fenster als
+    Vermutung (exact=False)."""
     if not changes:
         return {}
     starts = {
@@ -262,21 +295,30 @@ async def change_actors(db: DB, fw: Firewall, changes: list[ConfigChange]) -> di
     ).all()
     result: dict[int, list[dict]] = {}
     for c in changes:
+        window = [log for log in logs if starts[c.id] <= log.time <= c.time]
         name = c.name.lower()
-        hits = [
-            {
-                "time": log.time,
-                "user": log.user_name,
-                "src_ip": log.src_ip,
-                "via": log.log_component,
-                "message": log.message,
-            }
-            for log in logs
-            if starts[c.id] <= log.time <= c.time and name in log.message.lower()
-        ]
-        if hits:
-            result[c.id] = hits[-3:]
+        exact = [_actor(log, True) for log in window if name in log.message.lower()]
+        if exact:
+            result[c.id] = exact[-3:]
+            continue
+        guesses = [_actor(log, False) for log in window if any(w in log.message.lower() for w in _CHANGE_WORDS)]
+        if guesses:
+            result[c.id] = guesses[-3:]
     return result
+
+
+@router.get("/firewalls/{fw_id}/admin-events/status")
+async def admin_events_status(fw_id: int, db: DB, _user: CurrentUser) -> dict:
+    """Kommen Admin-Events per Syslog an? Ohne sie ist "wer hat geändert" nicht ermittelbar."""
+    await get_firewall(db, fw_id)
+    row = (
+        await db.execute(
+            select(func.count(), func.max(LogEntry.time)).where(
+                LogEntry.firewall_id == fw_id, LogEntry.time > datetime.now(UTC) - timedelta(days=7), _is_admin_log()
+            )
+        )
+    ).one()
+    return {"count_7d": row[0], "last_at": row[1]}
 
 
 def _change_dict(c: ConfigChange, actors: dict[int, list[dict]]) -> dict:

@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 import { fmtBytes, fmtDate, fmtNumber, fmtPercent } from "../lib/format";
 import type { AuditResult, ConfigChange, Firewall } from "../lib/types";
 import { KIND_LABEL, SEVERITY } from "./firewall/AuditTab";
-import { ACTION_LABEL, actionTone } from "./firewall/ChangesTab";
+import { ACTION_LABEL, ChangeTime, actionTone } from "./firewall/ChangesTab";
 
 interface Report {
   generated_at: string;
@@ -144,17 +144,21 @@ export function ReportPage() {
               <p className="text-sm text-muted-foreground">Keine Änderungen im Zeitraum.</p>
             ) : (
               <table className="w-full text-sm">
-                <thead><tr><th className={th}>Erkannt</th><th className={th}>Aktion</th><th className={th}>Typ</th><th className={th}>Objekt</th><th className={th}>Durch</th></tr></thead>
+                <thead><tr><th className={th}>Zeitpunkt</th><th className={th}>Aktion</th><th className={th}>Typ</th><th className={th}>Objekt</th><th className={th}>Durch</th></tr></thead>
                 <tbody>
                   {r.changes.map((c) => {
                     const actor = c.actors.at(-1);
                     return (
                       <tr key={c.id} className="border-t border-border">
-                        <td className={`${td} whitespace-nowrap`}>{fmtDate(c.time)}</td>
+                        <td className={td}><ChangeTime c={c} /></td>
                         <td className={td}><Pill tone={actionTone(c.action)}>{ACTION_LABEL[c.action]}</Pill></td>
                         <td className={td}>{c.entity_type}</td>
                         <td className={`${td} font-medium`}>{c.name}</td>
-                        <td className={td}>{actor ? `${actor.user ?? "?"}${actor.src_ip ? ` (${actor.src_ip})` : ""}` : "–"}</td>
+                        <td className={td}>
+                          {actor
+                            ? `${actor.exact ? "" : "vermutl. "}${actor.user ?? "?"}${actor.src_ip ? ` (${actor.src_ip})` : ""}`
+                            : "unbekannt"}
+                        </td>
                       </tr>
                     );
                   })}
