@@ -1,0 +1,57 @@
+name: sophosstats
+
+x-backend: &backend
+  build: ./backend
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+asyncpg://sophosstats:${POSTGRES_PASSWORD}@db:5432/sophosstats
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sophosstats
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
+      POSTGRES_DB: sophosstats
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sophosstats -d sophosstats"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    <<: *backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  collector:
+    <<: *backend
+    command: ["python", "-m", "app.collector"]
+    ports:
+      - "5514:5514/udp"
+      - "5514:5514/tcp"
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Eigenes Zertifikat: tls.crt + tls.key in ./certs ablegen (sonst wird ein selbstsigniertes erzeugt)
+      - ./certs:/etc/nginx/certs
+
+volumes:
+  db-data:
