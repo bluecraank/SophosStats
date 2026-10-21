@@ -95,9 +95,9 @@ export function LogTable({ fixed = {}, firewalls }: { fixed?: LogFilter; firewal
       ) : items.length === 0 ? (
         <Empty>Keine Logeinträge gefunden</Empty>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line bg-surface">
+        <div className="overflow-x-auto rounded-lg border border-border bg-card">
           <table className="w-full text-sm">
-            <thead className="bg-surface-2 text-left text-xs text-ink-2">
+            <thead className="bg-muted text-left text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">Zeit</th>
                 {showFw && <th className="px-3 py-2 font-medium">Firewall</th>}
@@ -112,8 +112,8 @@ export function LogTable({ fixed = {}, firewalls }: { fixed?: LogFilter; firewal
             <tbody>
               {items.map((l) => (
                 <Fragment key={l.id}>
-                  <tr className="cursor-pointer border-t border-line hover:bg-surface-2" onClick={() => setExpanded(expanded === l.id ? null : l.id)}>
-                    <td className="whitespace-nowrap px-3 py-1.5 text-ink-2">{fmtDate(l.time)}</td>
+                  <tr className="cursor-pointer border-t border-border hover:bg-muted" onClick={() => setExpanded(expanded === l.id ? null : l.id)}>
+                    <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{fmtDate(l.time)}</td>
                     {showFw && <td className="px-3 py-1.5">{fwName(l.firewall_id)}</td>}
                     <td className="whitespace-nowrap px-3 py-1.5">
                       <Pill tone={l.log_subtype === "Denied" || l.status === "Deny" ? "critical" : "neutral"}>
@@ -124,7 +124,7 @@ export function LogTable({ fixed = {}, firewalls }: { fixed?: LogFilter; firewal
                     <td className="max-w-48 truncate px-3 py-1.5">{l.rule_name ?? (l.rule_id != null ? `#${l.rule_id}` : "")}</td>
                     <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs">{l.src_ip}{l.src_port ? `:${l.src_port}` : ""}</td>
                     <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs">
-                      {l.dst_ip}{l.dst_port ? `:${l.dst_port}` : ""} {l.protocol && <span className="text-muted">{l.protocol}</span>}
+                      {l.dst_ip}{l.dst_port ? `:${l.dst_port}` : ""} {l.protocol && <span className="text-muted-foreground/70">{l.protocol}</span>}
                     </td>
                     <td className="max-w-40 truncate px-3 py-1.5">{l.user_name}</td>
                     <td className="whitespace-nowrap px-3 py-1.5 text-right text-xs">
@@ -132,13 +132,13 @@ export function LogTable({ fixed = {}, firewalls }: { fixed?: LogFilter; firewal
                     </td>
                   </tr>
                   {expanded === l.id && (
-                    <tr className="border-t border-line bg-surface-2">
+                    <tr className="border-t border-border bg-muted">
                       <td colSpan={showFw ? 8 : 7} className="px-3 py-2">
                         {l.message && <p className="mb-2 text-sm">{l.message}</p>}
                         <dl className="grid gap-x-4 gap-y-0.5 font-mono text-xs sm:grid-cols-2 lg:grid-cols-3">
                           {Object.entries(l.fields).map(([k, v]) => (
                             <div key={k} className="flex gap-2 overflow-hidden">
-                              <dt className="shrink-0 text-muted">{k}</dt>
+                              <dt className="shrink-0 text-muted-foreground/70">{k}</dt>
                               <dd className="truncate" title={v}>{v}</dd>
                             </div>
                           ))}

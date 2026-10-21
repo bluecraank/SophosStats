@@ -26,7 +26,7 @@ function PasswordCard() {
     <Card title="Passwort ändern">
       <form onSubmit={submit} className="max-w-sm space-y-3">
         <ErrorBox error={change.error} />
-        {change.isSuccess && <div className="text-sm text-ink-2">Passwort geändert. Andere Sitzungen wurden abgemeldet.</div>}
+        {change.isSuccess && <div className="text-sm text-muted-foreground">Passwort geändert. Andere Sitzungen wurden abgemeldet.</div>}
         <Field label="Aktuelles Passwort"><input className="input" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} required autoComplete="current-password" /></Field>
         <Field label="Neues Passwort (min. 12 Zeichen)"><input className="input" type="password" minLength={12} value={next} onChange={(e) => setNext(e.target.value)} required autoComplete="new-password" /></Field>
         <Field label="Wiederholen"><input className="input" type="password" value={repeat} onChange={(e) => setRepeat(e.target.value)} required autoComplete="new-password" /></Field>
@@ -74,11 +74,11 @@ function TotpCard() {
         </form>
       ) : setup ? (
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); enable.mutate(); }}>
-          <p className="text-sm text-ink-2">QR-Code mit einer Authenticator-App scannen (z.B. Microsoft Authenticator, 2FAS, Aegis) und den angezeigten Code eingeben.</p>
+          <p className="text-sm text-muted-foreground">QR-Code mit einer Authenticator-App scannen (z.B. Microsoft Authenticator, 2FAS, Aegis) und den angezeigten Code eingeben.</p>
           <div className="inline-block rounded-md bg-white p-3">
             <QRCodeSVG value={setup.uri} size={180} />
           </div>
-          <p className="font-mono text-xs break-all text-ink-2">Manuell: {setup.secret}</p>
+          <p className="font-mono text-xs break-all text-muted-foreground">Manuell: {setup.secret}</p>
           <div className="flex max-w-sm gap-2">
             <input className="input tracking-widest" inputMode="numeric" autoComplete="one-time-code" placeholder="123456" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} required />
             <button className="btn-primary" disabled={enable.isPending}>Aktivieren</button>
@@ -86,7 +86,7 @@ function TotpCard() {
         </form>
       ) : (
         <div className="space-y-3">
-          <p className="text-sm text-ink-2">Schützt dein Konto zusätzlich mit einem Einmalcode aus einer Authenticator-App.</p>
+          <p className="text-sm text-muted-foreground">Schützt dein Konto zusätzlich mit einem Einmalcode aus einer Authenticator-App.</p>
           <button className="btn-primary" onClick={() => start.mutate()} disabled={start.isPending}>2FA einrichten</button>
         </div>
       )}

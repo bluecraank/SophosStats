@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate } from "react-router";
 import { RouterProvider } from "react-router/dom";
 import { Layout } from "./components/Layout";
+import { TooltipProvider } from "./components/ui/tooltip";
 import "./index.css";
 import { ApiError } from "./lib/api";
 import { AuthProvider, useAuth } from "./lib/auth";
@@ -55,7 +56,9 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <RouterProvider router={router} />
+        <TooltipProvider delayDuration={200}>
+          <RouterProvider router={router} />
+        </TooltipProvider>
       </AuthProvider>
     </QueryClientProvider>
   </StrictMode>,

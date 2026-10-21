@@ -25,6 +25,8 @@ CONFIG_ENTITIES = [
     "IPHost",
     "IPHostGroup",
     "FQDNHost",
+    "FQDNHostGroup",
+    "MACHost",
     "Services",
     "ServiceGroup",
     "VPNIPSecConnection",

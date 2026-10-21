@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { DiffView } from "@/components/DiffView";
 import { Empty, ErrorBox, Loading, Pill } from "../../components/ui";
 import { api } from "../../lib/api";
 import { fmtDate } from "../../lib/format";
@@ -18,21 +19,12 @@ export function changedKeys(oldVal: unknown, newVal: unknown): string[] {
   return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
 }
 
-function JsonBlock({ title, value }: { title: string; value: unknown }) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-1 text-xs font-medium text-ink-2">{title}</div>
-      <pre className="max-h-96 overflow-auto rounded border border-line bg-surface p-2 text-xs">{JSON.stringify(value, null, 2)}</pre>
-    </div>
-  );
-}
-
 export function Actors({ actors }: { actors: ChangeActor[] }) {
   if (actors.length === 0) return null;
   const a = actors[actors.length - 1];
   return (
-    <span className="text-xs text-ink-2" title={actors.map((x) => `${fmtDate(x.time)}: ${x.message}`).join("\n")}>
-      von <strong className="text-ink">{a.user ?? "?"}</strong>
+    <span className="text-xs text-muted-foreground" title={actors.map((x) => `${fmtDate(x.time)}: ${x.message}`).join("\n")}>
+      von <strong className="text-foreground">{a.user ?? "?"}</strong>
       {a.src_ip && ` (${a.src_ip}${a.via ? `, ${a.via}` : ""})`}
     </span>
   );
@@ -41,12 +33,21 @@ export function Actors({ actors }: { actors: ChangeActor[] }) {
 function ChangeDetails({ old, next }: { old: unknown; next: unknown }) {
   const keys = changedKeys(old, next);
   return (
-    <div className="space-y-2 border-t border-line bg-surface-2 p-3">
-      {keys.length > 0 && <div className="text-xs text-ink-2">Geänderte Felder: {keys.join(", ")}</div>}
-      <div className="grid gap-3 md:grid-cols-2">
-        {old != null && <JsonBlock title="Vorher" value={old} />}
-        {next != null && <JsonBlock title="Nachher" value={next} />}
-      </div>
+    <div className="space-y-2 border-t border-border bg-muted/30 p-3">
+      {keys.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          Geänderte Felder:
+          {keys.map((k) => (
+            <Pill key={k} tone="accent">{k}</Pill>
+          ))}
+        </div>
+      )}
+      <DiffView
+        left={old}
+        right={next}
+        leftTitle={old == null ? "Vorher (nicht vorhanden)" : "Vorher"}
+        rightTitle={next == null ? "Nachher (entfernt)" : "Nachher"}
+      />
     </div>
   );
 }
@@ -63,17 +64,17 @@ function History({ fwId }: { fwId: number }) {
   }
   return (
     <div className="space-y-2">
-      {q.data.map((c) => (
-        <details key={c.id} className="rounded-md border border-line bg-surface">
+      {q.data.map((c, i) => (
+        <details key={c.id} open={i === 0} className="rounded-md border border-border bg-card">
           <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
             <span
-              className="w-36 text-xs text-ink-2"
+              className="w-36 text-xs text-muted-foreground"
               title={c.window_start ? `Geändert zwischen ${fmtDate(c.window_start)} und ${fmtDate(c.time)}` : undefined}
             >
               {fmtDate(c.time)}
             </span>
             <Pill tone={actionTone(c.action)}>{ACTION_LABEL[c.action]}</Pill>
-            <span className="text-ink-2">{c.entity_type}</span>
+            <span className="text-muted-foreground">{c.entity_type}</span>
             <span className="font-medium">{c.name}</span>
             <Actors actors={c.actors} />
           </summary>
@@ -100,7 +101,7 @@ function Since({ fwId }: { fwId: number }) {
   });
   return (
     <div className="space-y-3">
-      <label className="flex items-center gap-2 text-sm text-ink-2">
+      <label className="flex items-center gap-2 text-sm text-muted-foreground">
         Konfiguration vom
         <input type="date" className="input w-auto" value={date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDate(e.target.value)} />
         mit heute vergleichen
@@ -110,9 +111,9 @@ function Since({ fwId }: { fwId: number }) {
       {q.data && (
         <>
           {q.data.clamped && (
-            <p className="text-xs text-muted">Die Historie beginnt am {fmtDate(q.data.time)} – verglichen wird mit diesem frühesten bekannten Stand.</p>
+            <p className="text-xs text-muted-foreground/70">Die Historie beginnt am {fmtDate(q.data.time)} – verglichen wird mit diesem frühesten bekannten Stand.</p>
           )}
-          <p className="text-sm text-ink-2">
+          <p className="text-sm text-muted-foreground">
             {q.data.items.length === 0
               ? "Keine Unterschiede."
               : (["added", "modified", "removed"] as Action[])
@@ -122,12 +123,12 @@ function Since({ fwId }: { fwId: number }) {
           </p>
           <div className="space-y-2">
             {q.data.items.map((d) => (
-              <details key={`${d.entity_type}/${d.name}`} className="rounded-md border border-line bg-surface">
+              <details key={`${d.entity_type}/${d.name}`} className="rounded-md border border-border bg-card">
                 <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
                   <Pill tone={actionTone(d.action)}>{ACTION_LABEL[d.action]}</Pill>
-                  <span className="text-ink-2">{d.entity_type}</span>
+                  <span className="text-muted-foreground">{d.entity_type}</span>
                   <span className="font-medium">{d.name}</span>
-                  {d.changes > 1 && <span className="text-xs text-muted">({d.changes} Einzeländerungen)</span>}
+                  {d.changes > 1 && <span className="text-xs text-muted-foreground/70">({d.changes} Einzeländerungen)</span>}
                 </summary>
                 <ChangeDetails old={d.old} next={d.new} />
               </details>
@@ -143,7 +144,7 @@ export function ChangesTab({ fwId }: { fwId: number }) {
   const [mode, setMode] = useState<"history" | "since">("history");
   return (
     <div className="space-y-4">
-      <div className="inline-flex rounded-md border border-line bg-surface p-0.5" role="group">
+      <div className="inline-flex rounded-md border border-border bg-card p-0.5" role="group">
         {(
           [
             ["history", "Verlauf"],
@@ -154,14 +155,14 @@ export function ChangesTab({ fwId }: { fwId: number }) {
             key={id}
             onClick={() => setMode(id)}
             aria-pressed={mode === id}
-            className={`cursor-pointer rounded px-3 py-1 text-sm ${mode === id ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2"}`}
+            className={`cursor-pointer rounded px-3 py-1 text-sm ${mode === id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
           >
             {label}
           </button>
         ))}
       </div>
       {mode === "history" ? <History fwId={fwId} /> : <Since fwId={fwId} />}
-      <p className="text-xs text-muted">
+      <p className="text-xs text-muted-foreground/70">
         „von …“ wird aus den Admin-Events im Syslog ermittelt (Log-Kategorie „Admin“ bzw. Events auf der Firewall aktivieren).
       </p>
     </div>

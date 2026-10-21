@@ -61,17 +61,17 @@ export function ConfigTab({ fwId }: { fwId: number }) {
 
   return (
     <div className="space-y-4">
-      <label className="flex flex-wrap items-center gap-2 text-sm text-ink-2">
+      <label className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         Stand am
         <input type="date" className="input w-auto" value={date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDate(e.target.value)} />
         {date ? (
           <button className="btn-secondary py-1" onClick={() => setDate("")}>Aktueller Stand</button>
         ) : (
-          <span className="text-xs text-muted">leer = aktuell</span>
+          <span className="text-xs text-muted-foreground/70">leer = aktuell</span>
         )}
       </label>
       {at && historic.data?.clamped && (
-        <p className="text-xs text-muted">Die Historie beginnt am {fmtDate(historic.data.time)} – angezeigt wird der früheste bekannte Stand.</p>
+        <p className="text-xs text-muted-foreground/70">Die Historie beginnt am {fmtDate(historic.data.time)} – angezeigt wird der früheste bekannte Stand.</p>
       )}
       <ErrorBox error={error} />
       {loading ? (
@@ -87,11 +87,11 @@ export function ConfigTab({ fwId }: { fwId: number }) {
                   <button
                     onClick={() => setType(t.entity_type)}
                     className={`flex w-full cursor-pointer justify-between rounded px-2 py-1.5 text-sm ${
-                      selected === t.entity_type ? "bg-accent/12 font-medium" : "hover:bg-surface-2"
+                      selected === t.entity_type ? "bg-primary/12 font-medium" : "hover:bg-muted"
                     }`}
                   >
                     <span>{t.entity_type}</span>
-                    <span className="text-ink-2">{t.count}</span>
+                    <span className="text-muted-foreground">{t.count}</span>
                   </button>
                 </li>
               ))}
@@ -106,12 +106,12 @@ export function ConfigTab({ fwId }: { fwId: number }) {
             ) : (
               <div className="space-y-2">
                 {shown.map((o) => (
-                  <details key={o.name} className="rounded-md border border-line">
+                  <details key={o.name} className="rounded-md border border-border">
                     <summary className="flex cursor-pointer justify-between gap-2 px-3 py-2 text-sm">
                       <span className="font-medium">{o.name}</span>
-                      {o.updated_at && <span className="text-xs text-muted">geändert {fmtDate(o.updated_at)}</span>}
+                      {o.updated_at && <span className="text-xs text-muted-foreground/70">geändert {fmtDate(o.updated_at)}</span>}
                     </summary>
-                    <pre className="overflow-x-auto border-t border-line bg-surface-2 p-3 text-xs">{JSON.stringify(o.data, null, 2)}</pre>
+                    <pre className="overflow-x-auto border-t border-border bg-muted p-3 text-xs">{JSON.stringify(o.data, null, 2)}</pre>
                   </details>
                 ))}
               </div>

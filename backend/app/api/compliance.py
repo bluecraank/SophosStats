@@ -5,13 +5,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, func, or_, select
 
 from app.api.firewalls import get_firewall
 from app.api.stats import Hours, _since, rules_overview
-from app.models import ConfigChange, ConfigObject, Firewall, LogEntry, Metric
+from app.models import ConfigChange, ConfigObject, FindingAck, Firewall, LogEntry, Metric
 from app.schemas import FirewallOut
-from app.security import DB, CurrentUser
+from app.security import DB, AdminUser, CurrentUser
 from app.services.audit import audit_rules
 from app.services.config_history import Change, compare_objects, diff_since, state_at
 
@@ -47,6 +48,45 @@ async def _rule_profiles(db: DB, fw_id: int, rule_ids: list[int], since: datetim
     return {r.rule_id: {"sources": r.sources, "destinations": r.destinations, "ports": r.ports} for r in rows}
 
 
+def _ack_dict(a: FindingAck) -> dict:
+    return {
+        "id": a.id,
+        "reason": a.reason,
+        "by": a.created_by,
+        "at": a.created_at,
+        "expires_at": a.expires_at,
+    }
+
+
+async def _apply_acks(db: DB, fw_id: int, findings: list[dict], now: datetime) -> None:
+    """Hängt Akzeptanzen an Befunde. Gültig nur unverändert (Regel-Hash) und nicht abgelaufen."""
+    acks = {
+        (a.kind, a.rule_name): a
+        for a in (await db.execute(select(FindingAck).where(FindingAck.firewall_id == fw_id))).scalars()
+    }
+    if not acks:
+        return
+    hashes = dict(
+        (
+            await db.execute(
+                select(ConfigObject.name, ConfigObject.hash).where(
+                    ConfigObject.firewall_id == fw_id, ConfigObject.entity_type == "FirewallRule"
+                )
+            )
+        ).all()
+    )
+    for f in findings:
+        a = acks.get((f["kind"], f["rule"]))
+        if a is None:
+            continue
+        if a.rule_hash and hashes.get(f["rule"]) != a.rule_hash:
+            f["ack_stale"] = {**_ack_dict(a), "why": "Regel wurde seit der Akzeptanz geändert"}
+        elif a.expires_at and a.expires_at <= now:
+            f["ack_stale"] = {**_ack_dict(a), "why": "Akzeptanz ist abgelaufen"}
+        else:
+            f["ack"] = _ack_dict(a)
+
+
 async def _audit(db: DB, fw_id: int, unused_days: int) -> dict:
     now = datetime.now(UTC)
     since = now - timedelta(days=unused_days)
@@ -59,12 +99,15 @@ async def _audit(db: DB, fw_id: int, unused_days: int) -> dict:
     for f in findings:
         if f["kind"] == "too_broad" and f["rule_id"] in profiles:
             f["profile"] = profiles[f["rule_id"]]
+    await _apply_acks(db, fw_id, findings, now)
+    open_findings = [f for f in findings if "ack" not in f]
     return {
         "unused_days": unused_days,
         "data_since": overview["data_since"],
         "rule_count": len(rules),
         "enabled_count": sum(1 for r in rules if r["enabled"]),
-        "summary": dict(Counter(f["kind"] for f in findings)),
+        "summary": dict(Counter(f["kind"] for f in open_findings)),
+        "acknowledged": len(findings) - len(open_findings),
         "findings": findings,
     }
 
@@ -73,6 +116,52 @@ async def _audit(db: DB, fw_id: int, unused_days: int) -> dict:
 async def audit(fw_id: int, db: DB, _user: CurrentUser, unused_days: UnusedDays = 30) -> dict:
     await get_firewall(db, fw_id)
     return await _audit(db, fw_id, unused_days)
+
+
+class AckIn(BaseModel):
+    kind: str = Field(max_length=32)
+    rule: str = Field(max_length=255)
+    reason: str = Field(min_length=5, max_length=2000)
+    expires_days: int | None = Field(default=None, ge=1, le=1095)
+
+
+@router.post("/firewalls/{fw_id}/audit/acks", status_code=status.HTTP_201_CREATED)
+async def acknowledge(fw_id: int, body: AckIn, db: DB, admin: AdminUser) -> dict:
+    """Befund als bewusst akzeptiert markieren (ersetzt eine frühere Akzeptanz desselben Befunds)."""
+    await get_firewall(db, fw_id)
+    rule_hash = await db.scalar(
+        select(ConfigObject.hash).where(
+            ConfigObject.firewall_id == fw_id,
+            ConfigObject.entity_type == "FirewallRule",
+            ConfigObject.name == body.rule,
+        )
+    )
+    if rule_hash is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Regel nicht gefunden")
+    await db.execute(
+        delete(FindingAck).where(
+            FindingAck.firewall_id == fw_id, FindingAck.kind == body.kind, FindingAck.rule_name == body.rule
+        )
+    )
+    ack = FindingAck(
+        firewall_id=fw_id,
+        kind=body.kind,
+        rule_name=body.rule,
+        rule_hash=rule_hash,
+        reason=body.reason.strip(),
+        created_by=admin.username,
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(days=body.expires_days) if body.expires_days else None,
+    )
+    db.add(ack)
+    await db.commit()
+    return _ack_dict(ack)
+
+
+@router.delete("/firewalls/{fw_id}/audit/acks/{ack_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_ack(fw_id: int, ack_id: int, db: DB, _admin: AdminUser) -> None:
+    await db.execute(delete(FindingAck).where(FindingAck.firewall_id == fw_id, FindingAck.id == ack_id))
+    await db.commit()
 
 
 @router.get("/firewalls/{fw_id}/rules/{rule_id}/profile")

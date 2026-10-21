@@ -38,8 +38,19 @@ def covers(upper: dict[str, Any], lower: dict[str, Any]) -> bool:
     return True
 
 
-def _is_any_any(rule: dict[str, Any]) -> bool:
-    return not rule.get("source_networks") and not rule.get("destination_networks") and not rule.get("services")
+_SEVERITY_BY_OPEN = {1: "low", 2: "medium", 3: "high"}
+
+
+def open_dimensions(rule: dict[str, Any]) -> list[str]:
+    """Welche Seiten einer Regel nicht eingeschränkt sind (Any)."""
+    dims = []
+    if not rule.get("source_networks"):
+        dims.append("Quelle")
+    if not rule.get("destination_networks"):
+        dims.append("Ziel")
+    if not rule.get("services"):
+        dims.append("Dienste")
+    return dims
 
 
 def _finding(kind: str, severity: str, rule: dict[str, Any], message: str, **extra: Any) -> dict[str, Any]:
@@ -89,15 +100,23 @@ def audit_rules(
                 days = (now - last).days
                 findings.append(_finding("unused", "medium", rule, f"Seit {days} Tagen nicht genutzt", last_seen=last))
 
-        if rule.get("action") == "Accept" and _is_any_any(rule):
-            zones_any = not rule.get("source_zones") or not rule.get("destination_zones")
+        dims = open_dimensions(rule) if rule.get("action") == "Accept" else []
+        if dims:
+            text = {"Quelle": "beliebige Quelle", "Ziel": "beliebiges Ziel", "Dienste": "alle Dienste"}
+            zones_open = [
+                z
+                for z, key in (("Quell-Zone", "source_zones"), ("Ziel-Zone", "destination_zones"))
+                if not rule.get(key)
+            ]
             findings.append(
                 _finding(
                     "too_broad",
-                    "high" if zones_any else "medium",
+                    _SEVERITY_BY_OPEN[len(dims)],
                     rule,
-                    "Erlaubt beliebige Quell- und Zielnetze mit allen Diensten"
-                    + (" und ohne Zonen-Einschränkung" if zones_any else ""),
+                    "Erlaubt "
+                    + ", ".join(text[d] for d in dims)
+                    + (f" – zusätzlich ohne {' und '.join(zones_open)}" if zones_open else ""),
+                    open_dimensions=dims,
                 )
             )
 

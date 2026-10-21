@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -129,6 +130,23 @@ class ConfigChange(Base):
     window_start: Mapped[datetime | None] = _ts(nullable=True)
     old: Mapped[dict | None] = mapped_column(JSONB)
     new: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class FindingAck(Base):
+    """Bewusst akzeptierter Audit-Befund. Gilt nur, solange die Regel unverändert ist (rule_hash)."""
+
+    __tablename__ = "finding_acks"
+    __table_args__ = (UniqueConstraint("firewall_id", "kind", "rule_name", name="uq_finding_ack"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    firewall_id: Mapped[int] = mapped_column(ForeignKey("firewalls.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    rule_name: Mapped[str] = mapped_column(String(255))
+    rule_hash: Mapped[str | None] = mapped_column(String(64))
+    reason: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = _ts(server_default=func.now())
+    expires_at: Mapped[datetime | None] = _ts(nullable=True)
 
 
 # --- Zeitreihen (TimescaleDB-Hypertables, Primärschlüssel enthält immer `time`) ---

@@ -148,6 +148,17 @@ export interface AuditFinding {
   covered_by?: string;
   last_seen?: string;
   profile?: { sources: number; destinations: number; ports: number };
+  open_dimensions?: string[];
+  ack?: FindingAck;
+  ack_stale?: FindingAck & { why: string };
+}
+
+export interface FindingAck {
+  id: number;
+  reason: string;
+  by: string;
+  at: string;
+  expires_at: string | null;
 }
 
 export interface AuditResult {
@@ -156,6 +167,7 @@ export interface AuditResult {
   rule_count: number;
   enabled_count: number;
   summary: Partial<Record<FindingKind, number>>;
+  acknowledged: number;
   findings: AuditFinding[];
 }
 

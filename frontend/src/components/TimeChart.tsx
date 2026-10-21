@@ -1,5 +1,6 @@
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { fmtAxisTime, fmtDate } from "../lib/format";
+import { useId } from "react";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { fmtAxisTime, fmtDate } from "@/lib/format";
 
 export interface Series {
   key: string;
@@ -23,6 +24,47 @@ export function mergeSeries(series: Record<string, { t: string; v: number | null
   return [...byTime.values()].sort((a, b) => a.t.localeCompare(b.t));
 }
 
+interface TooltipPayload {
+  dataKey: string;
+  name: string;
+  value: number | null;
+}
+
+function ChartTooltip({
+  active,
+  label,
+  payload,
+  series,
+  format,
+}: {
+  active?: boolean;
+  label?: string;
+  payload?: TooltipPayload[];
+  series: Series[];
+  format: (v: number) => string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="min-w-40 rounded-lg border bg-popover/95 px-3 py-2 text-xs shadow-xl backdrop-blur">
+      <div className="mb-1.5 text-muted-foreground">{fmtDate(String(label))}</div>
+      {payload.map((p) => {
+        const s = series.find((x) => x.key === p.dataKey);
+        return (
+          <div key={p.dataKey} className="flex items-center justify-between gap-4">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <span className="h-0.5 w-3 rounded" style={{ background: `var(--series-${s?.slot ?? 1})` }} />
+              {p.name}
+            </span>
+            <span className="font-medium tabular-nums text-foreground">
+              {typeof p.value === "number" ? format(p.value) : "–"}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function TimeChart({
   data,
   series,
@@ -38,9 +80,10 @@ export function TimeChart({
   yMax?: number;
   height?: number;
 }) {
+  const id = useId().replace(/:/g, "");
   if (data.length === 0) {
     return (
-      <div className="flex items-center justify-center text-sm text-muted" style={{ height }}>
+      <div className="flex items-center justify-center text-sm text-muted-foreground" style={{ height }}>
         Keine Daten im Zeitraum
       </div>
     );
@@ -48,7 +91,7 @@ export function TimeChart({
   return (
     <div>
       {series.length > 1 && (
-        <ul className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-2" aria-label="Legende">
+        <ul className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-label="Legende">
           {series.map((s) => (
             <li key={s.key} className="flex items-center gap-1.5">
               <span className="inline-block h-0.5 w-4 rounded" style={{ background: `var(--series-${s.slot})` }} />
@@ -58,52 +101,52 @@ export function TimeChart({
         </ul>
       )}
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <defs>
+            {series.map((s) => (
+              <linearGradient key={s.key} id={`${id}-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={`var(--series-${s.slot})`} stopOpacity={0.28} />
+                <stop offset="100%" stopColor={`var(--series-${s.slot})`} stopOpacity={0} />
+              </linearGradient>
+            ))}
+          </defs>
           <CartesianGrid vertical={false} stroke="var(--grid)" />
           <XAxis
             dataKey="t"
             tickFormatter={(t: string) => fmtAxisTime(t, hours)}
-            tick={{ fill: "var(--muted)", fontSize: 11 }}
-            axisLine={{ stroke: "var(--border)" }}
+            tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+            axisLine={false}
             tickLine={false}
             minTickGap={40}
           />
           <YAxis
             tickFormatter={(v: number) => format(v)}
-            tick={{ fill: "var(--muted)", fontSize: 11 }}
+            tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
             axisLine={false}
             tickLine={false}
             width={72}
             domain={[0, yMax ?? "auto"]}
           />
           <Tooltip
-            cursor={{ stroke: "var(--muted)", strokeDasharray: "3 3" }}
-            contentStyle={{
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              fontSize: 12,
-              color: "var(--text)",
-            }}
-            labelStyle={{ color: "var(--text-2)" }}
-            itemStyle={{ color: "var(--text)" }}
-            labelFormatter={(t) => fmtDate(String(t))}
-            formatter={(v, name) => [typeof v === "number" ? format(v) : "–", name]}
+            cursor={{ stroke: "var(--muted-foreground)", strokeDasharray: "3 3", strokeOpacity: 0.5 }}
+            content={<ChartTooltip series={series} format={format} />}
           />
           {series.map((s) => (
-            <Line
+            <Area
               key={s.key}
+              type="monotone"
               dataKey={s.key}
               name={s.label}
               stroke={`var(--series-${s.slot})`}
               strokeWidth={2}
+              fill={`url(#${id}-${s.key})`}
               dot={false}
-              activeDot={{ r: 4, stroke: "var(--surface)", strokeWidth: 2 }}
+              activeDot={{ r: 4, stroke: "var(--card)", strokeWidth: 2 }}
               connectNulls
               isAnimationActive={false}
             />
           ))}
-        </LineChart>
+        </AreaChart>
       </ResponsiveContainer>
     </div>
   );

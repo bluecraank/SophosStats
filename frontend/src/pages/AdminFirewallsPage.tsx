@@ -156,11 +156,11 @@ function FirewallRow({ fw, onEdit }: { fw: Firewall; onEdit: () => void }) {
   });
 
   return (
-    <div className="space-y-3 border-t border-line py-4 first:border-t-0 first:pt-0">
+    <div className="space-y-3 border-t border-border py-4 first:border-t-0 first:pt-0">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="font-medium">{fw.name} {!fw.enabled && <span className="text-xs text-muted">(deaktiviert)</span>}</div>
-          <div className="text-xs text-ink-2">{fw.host}:{fw.api_port} · {fw.model ?? "?"} · {fw.firmware ?? "?"}</div>
+          <div className="font-medium">{fw.name} {!fw.enabled && <span className="text-xs text-muted-foreground/70">(deaktiviert)</span>}</div>
+          <div className="text-xs text-muted-foreground">{fw.host}:{fw.api_port} · {fw.model ?? "?"} · {fw.firmware ?? "?"}</div>
         </div>
         <div className="flex flex-wrap gap-2">
           <button className="btn-secondary" onClick={() => test.mutate()} disabled={test.isPending}>{test.isPending ? "Teste …" : "Verbindung testen"}</button>
@@ -176,7 +176,7 @@ function FirewallRow({ fw, onEdit }: { fw: Firewall; onEdit: () => void }) {
       <SourceBadges fw={fw} />
       <ErrorBox error={test.error ?? remove.error} />
       {test.data && (
-        <div className="space-y-1 rounded-md bg-surface-2 px-3 py-2 text-sm">
+        <div className="space-y-1 rounded-md bg-muted px-3 py-2 text-sm">
           <div><StatusBadge status={test.data.xml_api_ok ? "good" : "critical"} label="XML-API" /> <span className="ml-2">{test.data.xml_api_message}</span></div>
           <div>
             <StatusBadge status={test.data.snmp_ok == null ? "off" : test.data.snmp_ok ? "good" : "critical"} label="SNMP" />{" "}
@@ -210,11 +210,11 @@ export function AdminFirewallsPage() {
         ))}
       </Card>
       <Card title="Einrichtung auf der Sophos-Firewall">
-        <ol className="list-decimal space-y-2 pl-5 text-sm text-ink-2">
-          <li><strong className="text-ink">XML-API:</strong> Backup &amp; firmware → API → „API configuration“ aktivieren und die IP dieses Servers als „Allowed IP address“ eintragen. Einen eigenen Admin mit Leserechten verwenden.</li>
-          <li><strong className="text-ink">SNMP v3:</strong> Administration → SNMP → SNMP-Agent aktivieren, SNMPv3-Benutzer anlegen (Auth SHA256, Verschlüsselung AES). Unter Administration → Device access SNMP für die Zone dieses Servers erlauben.</li>
-          <li><strong className="text-ink">Syslog:</strong> System services → Log settings → Syslog-Server hinzufügen: IP dieses Servers, Port 5514 (UDP oder TCP), Format „Device standard format“. Mindestens die Kategorie „Firewall“ aktivieren.</li>
-          <li><strong className="text-ink">Regelnutzung:</strong> In jeder Firewall-Regel „Log firewall traffic“ einschalten – nur geloggte Regeln liefern Treffer und Bytes.</li>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
+          <li><strong className="text-foreground">XML-API:</strong> Backup &amp; firmware → API → „API configuration“ aktivieren und die IP dieses Servers als „Allowed IP address“ eintragen. Einen eigenen Admin mit Leserechten verwenden.</li>
+          <li><strong className="text-foreground">SNMP v3:</strong> Administration → SNMP → SNMP-Agent aktivieren, SNMPv3-Benutzer anlegen (Auth SHA256, Verschlüsselung AES). Unter Administration → Device access SNMP für die Zone dieses Servers erlauben.</li>
+          <li><strong className="text-foreground">Syslog:</strong> System services → Log settings → Syslog-Server hinzufügen: IP dieses Servers, Port 5514 (UDP oder TCP), Format „Device standard format“. Mindestens die Kategorie „Firewall“ aktivieren.</li>
+          <li><strong className="text-foreground">Regelnutzung:</strong> In jeder Firewall-Regel „Log firewall traffic“ einschalten – nur geloggte Regeln liefern Treffer und Bytes.</li>
         </ol>
       </Card>
     </div>

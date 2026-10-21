@@ -29,7 +29,26 @@ def rule(name, pos, **kw):
 
 
 def kinds(findings, name):
-    return {f["kind"] for f in findings if f["rule"] == name}
+    # "too_broad" trifft die Basisregel (Any-Netze) immer – in den übrigen Tests ausblenden
+    return {f["kind"] for f in findings if f["rule"] == name and f["kind"] != "too_broad"}
+
+
+def broad(findings, name):
+    return next((f for f in findings if f["rule"] == name and f["kind"] == "too_broad"), None)
+
+
+def test_too_broad_is_graded():
+    tight = rule("tight", 0, source_networks=["LAN-Net"], destination_networks=["Server"])
+    one = rule("one", 1, source_networks=["LAN-Net"])
+    two = rule("two", 2)
+    three = rule("three", 3, services=[])
+    drop = rule("drop", 4, action="Drop", services=[])
+    f = audit_rules([tight, one, two, three, drop], NOW, None)
+    assert broad(f, "tight") is None
+    assert broad(f, "one")["severity"] == "low" and broad(f, "one")["open_dimensions"] == ["Ziel"]
+    assert broad(f, "two")["severity"] == "medium"
+    assert broad(f, "three")["severity"] == "high"
+    assert broad(f, "drop") is None  # blockierende Regeln sind nie "zu breit"
 
 
 def test_covers_any_and_subsets():

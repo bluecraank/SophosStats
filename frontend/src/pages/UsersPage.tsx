@@ -62,7 +62,7 @@ export function UsersPage() {
         {q.isPending ? <Loading /> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="text-left text-xs text-ink-2">
+              <thead className="text-left text-xs text-muted-foreground">
                 <tr>
                   <th className="py-2 font-medium">Benutzer</th>
                   <th className="py-2 font-medium">Rolle</th>
@@ -73,7 +73,7 @@ export function UsersPage() {
               </thead>
               <tbody>
                 {q.data?.map((u) => (
-                  <tr key={u.id} className="border-t border-line">
+                  <tr key={u.id} className="border-t border-border">
                     <td className="py-2">
                       {u.username} {!u.is_active && <Pill>deaktiviert</Pill>} {u.id === me?.id && <Pill tone="accent">du</Pill>}
                     </td>
@@ -90,7 +90,7 @@ export function UsersPage() {
                       </select>
                     </td>
                     <td className="py-2">{u.totp_enabled ? <Pill tone="good">aktiv</Pill> : <Pill>aus</Pill>}</td>
-                    <td className="py-2 text-ink-2">{fmtRelative(u.last_login)}</td>
+                    <td className="py-2 text-muted-foreground">{fmtRelative(u.last_login)}</td>
                     <td className="py-2">
                       {u.id !== me?.id && (
                         <div className="flex flex-wrap justify-end gap-2">

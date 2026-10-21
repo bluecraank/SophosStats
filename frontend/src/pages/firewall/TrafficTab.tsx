@@ -41,11 +41,11 @@ export function TrafficTab({ fwId }: { fwId: number }) {
               <button
                 onClick={() => setSelected(i.interface)}
                 className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm ${
-                  current === i.interface ? "bg-accent/12" : "hover:bg-surface-2"
+                  current === i.interface ? "bg-primary/12" : "hover:bg-muted"
                 }`}
               >
                 <StatusBadge status={i.oper_up == null ? "off" : i.oper_up ? "good" : "critical"} label={i.interface} />
-                <span className="text-right text-xs text-ink-2">
+                <span className="text-right text-xs text-muted-foreground">
                   ↓ {fmtBps(i.in_bps)}
                   <br />↑ {fmtBps(i.out_bps)}
                 </span>

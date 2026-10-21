@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { DiffView } from "@/components/DiffView";
 import { Card, Empty, ErrorBox, Loading } from "../components/ui";
 import { api } from "../lib/api";
 import type { Firewall } from "../lib/types";
@@ -19,9 +20,6 @@ interface Detail {
   same: number;
 }
 
-function Pre({ value }: { value: unknown }) {
-  return <pre className="max-h-80 overflow-auto rounded border border-line bg-surface-2 p-2 text-xs">{JSON.stringify(value, null, 2)}</pre>;
-}
 
 export function ComparePage() {
   const firewalls = useQuery({ queryKey: ["firewalls"], queryFn: () => api<Firewall[]>("/api/firewalls") });
@@ -61,7 +59,7 @@ export function ComparePage() {
       <h1 className="text-xl font-semibold">Firewalls vergleichen</h1>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         {select(fa, setA, "Firewall A")}
-        <span className="text-ink-2">mit</span>
+        <span className="text-muted-foreground">mit</span>
         {select(fb, setB, "Firewall B")}
       </div>
       {!ready && <Empty>Zwei verschiedene Firewalls auswählen</Empty>}
@@ -69,7 +67,7 @@ export function ComparePage() {
       {summary.data && (
         <Card title="Objekttypen">
           <table className="w-full text-sm">
-            <thead className="text-left text-xs text-ink-2">
+            <thead className="text-left text-xs text-muted-foreground">
               <tr>
                 <th className="py-1 font-medium">Typ</th>
                 <th className="py-1 text-right font-medium">Nur {name(fa)}</th>
@@ -83,13 +81,13 @@ export function ComparePage() {
                 <tr
                   key={t.entity_type}
                   onClick={() => setType(t.entity_type)}
-                  className={`cursor-pointer border-t border-line hover:bg-surface-2 ${type === t.entity_type ? "bg-accent/12" : ""}`}
+                  className={`cursor-pointer border-t border-border hover:bg-muted ${type === t.entity_type ? "bg-primary/12" : ""}`}
                 >
                   <td className="py-1.5 font-medium">{t.entity_type}</td>
                   <td className="py-1.5 text-right">{t.only_a || "–"}</td>
                   <td className="py-1.5 text-right">{t.only_b || "–"}</td>
                   <td className="py-1.5 text-right">{t.different || "–"}</td>
-                  <td className="py-1.5 text-right text-ink-2">{t.same}</td>
+                  <td className="py-1.5 text-right text-muted-foreground">{t.same}</td>
                 </tr>
               ))}
             </tbody>
@@ -108,14 +106,13 @@ export function ComparePage() {
           <Card title={`Unterschiedlich (${detail.data.different.length})`} className="lg:col-span-2">
             <div className="space-y-2">
               {detail.data.different.map((d) => (
-                <details key={d.name} className="rounded-md border border-line">
+                <details key={d.name} className="rounded-md border border-border">
                   <summary className="cursor-pointer px-3 py-2 text-sm">
                     <span className="font-medium">{d.name}</span>{" "}
-                    <span className="text-xs text-ink-2">– {changedKeys(d.a, d.b).join(", ")}</span>
+                    <span className="text-xs text-muted-foreground">– {changedKeys(d.a, d.b).join(", ")}</span>
                   </summary>
-                  <div className="grid gap-3 border-t border-line p-3 md:grid-cols-2">
-                    <div><div className="mb-1 text-xs text-ink-2">{name(fa)}</div><Pre value={d.a} /></div>
-                    <div><div className="mb-1 text-xs text-ink-2">{name(fb)}</div><Pre value={d.b} /></div>
+                  <div className="border-t border-border p-3">
+                    <DiffView left={d.a} right={d.b} leftTitle={name(fa)} rightTitle={name(fb)} />
                   </div>
                 </details>
               ))}
