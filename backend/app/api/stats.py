@@ -90,7 +90,7 @@ async def metrics(
 ) -> dict:
     await get_firewall(db, fw_id)
     secs = _bucket_seconds(hours)
-    bucket = _bucket(Metric.time, secs).label("t")
+    bucket = _bucket(Metric.time, secs).label("bucket")
     stmt = (
         select(bucket, Metric.name, func.avg(Metric.value).label("v"), func.max(Metric.value).label("max"))
         .where(Metric.firewall_id == fw_id, Metric.time > _since(hours))
@@ -101,7 +101,7 @@ async def metrics(
         stmt = stmt.where(Metric.name.in_(names))
     series: dict[str, list[dict]] = {}
     for row in (await db.execute(stmt)).all():
-        series.setdefault(row.name, []).append({"t": row.t, "v": row.v, "max": row.max})
+        series.setdefault(row.name, []).append({"t": row.bucket, "v": row.v, "max": row.max})
     return {"bucket_seconds": secs, "series": series}
 
 
@@ -117,7 +117,7 @@ async def interfaces(fw_id: int, db: DB, _user: CurrentUser, hours: Hours = 24) 
         )
     ).scalars()
     secs = _bucket_seconds(hours)
-    bucket = _bucket(InterfaceMetric.time, secs).label("t")
+    bucket = _bucket(InterfaceMetric.time, secs).label("bucket")
     rows = (
         await db.execute(
             select(
@@ -137,7 +137,7 @@ async def interfaces(fw_id: int, db: DB, _user: CurrentUser, hours: Hours = 24) 
             {"interface": i.interface, "time": i.time, "in_bps": i.in_bps, "out_bps": i.out_bps, "oper_up": i.oper_up}
             for i in latest
         ],
-        "series": [{"t": r.t, "interface": r.interface, "in_bps": r.in_bps, "out_bps": r.out_bps} for r in rows],
+        "series": [{"t": r.bucket, "interface": r.interface, "in_bps": r.in_bps, "out_bps": r.out_bps} for r in rows],
     }
 
 
@@ -240,7 +240,7 @@ async def rule_series(fw_id: int, rule_id: int, db: DB, _user: CurrentUser, hour
     await get_firewall(db, fw_id)
     secs = max(3600, _bucket_seconds(hours))
     u = RuleUsageHourly
-    bucket = _bucket(u.time, secs).label("t")
+    bucket = _bucket(u.time, secs).label("bucket")
     rows = (
         await db.execute(
             select(
@@ -257,7 +257,7 @@ async def rule_series(fw_id: int, rule_id: int, db: DB, _user: CurrentUser, hour
     return {
         "bucket_seconds": secs,
         "series": [
-            {"t": r.t, "hits": int(r.hits), "sent_bytes": int(r.sent_bytes), "recv_bytes": int(r.recv_bytes)}
+            {"t": r.bucket, "hits": int(r.hits), "sent_bytes": int(r.sent_bytes), "recv_bytes": int(r.recv_bytes)}
             for r in rows
         ],
     }
