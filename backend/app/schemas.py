@@ -72,6 +72,7 @@ class FirewallBase(BaseModel):
     snmp_auth_protocol: AuthProto = "SHA256"
     snmp_priv_protocol: PrivProto = "AES128"
     syslog_source_ip: str | None = Field(default=None, max_length=64)
+    site_networks: str | None = Field(default=None, max_length=4000)
     metrics_interval_s: int = Field(default=60, ge=15, le=3600)
     config_interval_s: int = Field(default=900, ge=60, le=86400)
 
@@ -100,6 +101,7 @@ class FirewallUpdate(BaseModel):
     snmp_priv_protocol: PrivProto | None = None
     snmp_priv_key: str | None = None
     syslog_source_ip: str | None = None
+    site_networks: str | None = Field(default=None, max_length=4000)
     metrics_interval_s: int | None = Field(default=None, ge=15, le=3600)
     config_interval_s: int | None = Field(default=None, ge=60, le=86400)
 

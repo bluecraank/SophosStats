@@ -84,6 +84,9 @@ class Firewall(Base):
 
     # Syslog: Absender-IP, über die eingehende Logs dieser Firewall zugeordnet werden
     syslog_source_ip: Mapped[str | None] = mapped_column(String(64))
+    # Zusätzliche interne Netze dieses Standorts (CIDR, Komma/Zeilen getrennt) – ergänzt die automatisch
+    # aus den Interfaces erkannten Netze für die standortübergreifende Auswertung
+    site_networks: Mapped[str | None] = mapped_column(Text)
 
     metrics_interval_s: Mapped[int] = mapped_column(Integer, default=60)
     config_interval_s: Mapped[int] = mapped_column(Integer, default=900)

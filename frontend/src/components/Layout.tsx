@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   LogOut,
   Moon,
+  Route,
   ScrollText,
   Search,
   Server,
@@ -132,6 +133,7 @@ function CommandMenu({ firewalls, isAdmin }: { firewalls: Firewall[]; isAdmin: b
           <CommandGroup heading="Seiten">
             <CommandItem onSelect={() => go("/")}><LayoutDashboard />Übersicht</CommandItem>
             <CommandItem onSelect={() => go("/logs")}><ScrollText />Logs</CommandItem>
+            {firewalls.length > 1 && <CommandItem onSelect={() => go("/cross-site")}><Route />Standortübergreifend / Pfad verfolgen</CommandItem>}
             {firewalls.length > 1 && <CommandItem onSelect={() => go("/compare")}><GitCompareArrows />Firewalls vergleichen</CommandItem>}
             <CommandItem onSelect={() => go("/account")}><KeyRound />Konto &amp; 2FA</CommandItem>
             {isAdmin && <CommandItem onSelect={() => go("/admin/firewalls")}><Settings2 />Firewalls verwalten</CommandItem>}
@@ -195,6 +197,7 @@ export function Layout() {
             <SidebarMenu>
               <NavLinkItem to="/" icon={LayoutDashboard} end>Übersicht</NavLinkItem>
               <NavLinkItem to="/logs" icon={ScrollText}>Logs</NavLinkItem>
+              {fws.length > 1 && <NavLinkItem to="/cross-site" icon={Route}>Standortübergreifend</NavLinkItem>}
               {fws.length > 1 && <NavLinkItem to="/compare" icon={GitCompareArrows}>Vergleichen</NavLinkItem>}
             </SidebarMenu>
           </SidebarGroup>

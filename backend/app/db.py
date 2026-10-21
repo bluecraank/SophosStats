@@ -36,6 +36,9 @@ _SCHEMA_LOCK_ID = 727274001
 _ADDED_COLUMNS = [
     "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS last_config_warning TEXT",
     "ALTER TABLE config_changes ADD COLUMN IF NOT EXISTS window_start TIMESTAMPTZ",
+    "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS site_networks TEXT",
+    # Korrelation von Verbindungen über mehrere Firewalls (Quelle/Ziel im Zeitfenster)
+    "CREATE INDEX IF NOT EXISTS ix_log_flow ON log_entries (src_ip, dst_ip, time)",
 ]
 
 
@@ -57,7 +60,11 @@ async def init_schema() -> None:
         await conn.run_sync(Base.metadata.create_all)
         # create_all ergänzt keine Spalten in bestehenden Tabellen – nachträglich hinzugekommene hier nachziehen
         for stmt in _ADDED_COLUMNS:
-            await conn.execute(text(stmt))
+            try:
+                async with conn.begin_nested():
+                    await conn.execute(text(stmt))
+            except Exception as exc:  # noqa: BLE001 - z.B. Index auf komprimierter Hypertable
+                log.warning("Schema-Ergänzung übersprungen (%s): %s", stmt[:60], exc)
 
         if not timescale:
             return

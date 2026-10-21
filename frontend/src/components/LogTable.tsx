@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { ChevronRight, Equal, EqualNot, Loader2, Search, X } from "lucide-react";
+import { ChevronRight, Equal, EqualNot, Loader2, Route, Search, X } from "lucide-react";
 import { Fragment, useMemo, useState, type MouseEvent, type ReactNode } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -67,7 +67,24 @@ function Details({ log, onFilter }: { log: LogItem; onFilter: (f: LogFilterValue
   const entries = Object.entries(log.fields).filter(([, v]) => v !== "");
   return (
     <div className="space-y-3 bg-muted/30 px-4 py-3">
-      {log.message && <p className="text-sm">{log.message}</p>}
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        {log.message ? <p className="text-sm">{log.message}</p> : <span />}
+        {log.src_ip && log.dst_ip && (
+          <Button variant="outline" size="sm" asChild>
+            <Link
+              to={`/cross-site?${new URLSearchParams({
+                src: log.src_ip,
+                dst: log.dst_ip,
+                ...(log.dst_port ? { port: String(log.dst_port) } : {}),
+                ...(log.protocol ? { proto: log.protocol } : {}),
+                t: log.time,
+              })}`}
+            >
+              <Route /> Pfad über alle Firewalls verfolgen
+            </Link>
+          </Button>
+        )}
+      </div>
       <dl className="grid gap-x-6 gap-y-0.5 font-mono text-xs sm:grid-cols-2 xl:grid-cols-3">
         {entries.map(([k, v]) => {
           const field = RAW_TO_COLUMN[k] ?? k;

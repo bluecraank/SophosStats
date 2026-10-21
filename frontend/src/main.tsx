@@ -15,6 +15,7 @@ import { FirewallPage } from "./pages/FirewallPage";
 import { LoginPage } from "./pages/LoginPage";
 import { LogsPage } from "./pages/LogsPage";
 import { ComparePage } from "./pages/ComparePage";
+import { CrossSitePage } from "./pages/CrossSitePage";
 import { ReportPage } from "./pages/ReportPage";
 import { UsersPage } from "./pages/UsersPage";
 
@@ -44,6 +45,7 @@ const router = createBrowserRouter([
       { path: "firewalls/:id", element: <FirewallPage /> },
       { path: "firewalls/:id/report", element: <ReportPage /> },
       { path: "compare", element: <ComparePage /> },
+      { path: "cross-site", element: <CrossSitePage /> },
       { path: "account", element: <AccountPage /> },
       { path: "admin/firewalls", element: <AdminOnly><AdminFirewallsPage /></AdminOnly> },
       { path: "admin/users", element: <AdminOnly><UsersPage /></AdminOnly> },

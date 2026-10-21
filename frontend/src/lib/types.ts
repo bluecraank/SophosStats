@@ -24,6 +24,7 @@ export interface Firewall {
   snmp_auth_protocol: string;
   snmp_priv_protocol: string;
   syslog_source_ip: string | null;
+  site_networks: string | null;
   metrics_interval_s: number;
   config_interval_s: number;
   model: string | null;
