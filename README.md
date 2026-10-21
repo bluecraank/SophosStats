@@ -1,111 +1,319 @@
+<div align="center">
+
 # SophosStats
 
-Sammelt Statistiken von Sophos-XGS-Firewalls (SFOS) und stellt sie in einer Weboberfläche mit Login dar.
+**Monitoring, Regel-Analyse und Compliance für Sophos-XGS-Firewalls (SFOS).**
 
-| Bereich | Quelle | Intervall |
+SNMP v3 · XML-API · Syslog · Docker · Python/FastAPI · React/shadcn/ui
+
+![Übersicht](docs/screenshots/dashboard.png)
+
+</div>
+
+SophosStats sammelt im Hintergrund Systemwerte, Konfiguration und Logs mehrerer Sophos-XGS-Firewalls und
+macht sie in einer modernen Weboberfläche auswertbar. Dazu gehören Auslastung, Regelnutzung, Regel-Audit,
+Konfigurationsänderungen mit Verursacher, Beziehungen zwischen Objekten und Regeln sowie die Verfolgung
+blockierter Verbindungen über mehrere Standorte.
+
+---
+
+## Inhalt
+
+- [Funktionen](#funktionen)
+- [Screenshots](#screenshots)
+- [Wie es funktioniert](#wie-es-funktioniert)
+- [Schnellstart (Docker Compose)](#schnellstart-docker-compose)
+- [Deployment mit Portainer](#deployment-mit-portainer)
+- [Konfiguration](#konfiguration)
+- [Einrichtung auf der Sophos XGS](#einrichtung-auf-der-sophos-xgs)
+- [Sicherheit](#sicherheit)
+- [Betrieb: Updates, Backup, Datenhaltung](#betrieb-updates-backup-datenhaltung)
+- [Fehlerbehebung](#fehlerbehebung)
+- [Entwicklung](#entwicklung)
+- [Bekannte Grenzen](#bekannte-grenzen)
+
+---
+
+## Funktionen
+
+**Monitoring**
+- CPU, RAM, Disk, Swap, Uptime und Live-User per SNMP v3, als Verlauf von 1 Stunde bis 90 Tage
+- Durchsatz und Link-Status aller Interfaces
+- Übersicht über alle Firewalls mit Status der Datenquellen (SNMP, API, Syslog)
+
+**Regeln**
+- Alle Firewall-Regeln mit **Treffern, Bytes gesendet/empfangen und „zuletzt genutzt“**, berechnet aus den Logs
+- Kombinierbare Filter (Zonen, Netze, Dienste, „Any“, Aktion, Logging, Treffer, Alter) und Schnellfilter
+- Pro Regel: Verlauf, Top-Quellen/-Ziele/-Ports und ein **Nutzungsprofil**, das zeigt, was die Regel tatsächlich durchlässt
+
+**Regel-Audit**
+- Findet verdeckte und redundante Regeln, zu breite Regeln (Any als Quelle, Ziel oder Dienst, gestuft nach Schwere), ungenutzte, ungeloggte und deaktivierte Regeln
+- Befunde lassen sich **mit Begründung als okay markieren**. Die Akzeptanz verfällt automatisch, wenn die Regel geändert wird oder die Frist abläuft.
+
+**Beziehungen**
+- **Zonen-Matrix**: Quell- × Ziel-Zone mit Anzahl der Regeln und Treffern, auch bei tausenden Regeln übersichtlich
+- **Fokus-Graph**: Zu einem Objekt (Host, Gruppe, Dienst, Zone, Regel) siehst du alle Regeln, die darauf verweisen, auch indirekt über Gruppen
+
+**Änderungen und Compliance**
+- Jeder Konfigurationsabruf wird mit dem vorherigen verglichen. Hinzugefügte, geänderte und entfernte Objekte landen in einer Historie.
+- **Side-by-Side-Diff** mit Hervorhebung der geänderten Werte
+- **Wer und wann**: Zuordnung der Änderungen zu den Admin-Events aus dem Syslog
+- Konfiguration „Stand am Datum X“, Vergleich mit heute, Vergleich zweier Firewalls
+- **Druckbarer Bericht** für einen Zeitraum, als PDF über den Browser, inklusive akzeptierter Hinweise
+
+**Logs**
+- Alle Logs per Syslog, mit Volltextsuche und **kombinierbaren Filtern**: Subnetz (CIDR), Ports, beliebige Rohfelder
+- Klick auf einen Wert filtert danach, Strg+Klick schließt ihn aus. Die Suche steht in der URL und lässt sich teilen.
+
+**Standortübergreifend**
+- Verfolgt eine Verbindung über mehrere Firewalls, z. B. Standort A → WireGuard → Standort B, und zeigt: *„Auf FW-A erlaubt, auf FW-B blockiert → Regel fehlt auf FW-B“*
+- Übersicht aller blockierten Verbindungen zwischen Standorten mit Handlungsbedarf
+
+**Bedienung**
+- Login mit **2FA (TOTP)**, Rollen Administrator und Betrachter
+- Dunkles und helles Design, Suche über **Strg+K**, alle Ansichten per URL verlinkbar
+
+---
+
+## Screenshots
+
+| | |
+|---|---|
+| **System**: Auslastung und Verlauf<br>![System](docs/screenshots/system.png) | **Regeln**: Nutzung und kombinierbare Filter<br>![Regeln](docs/screenshots/rules.png) |
+| **Audit**: Befunde mit Akzeptanz<br>![Audit](docs/screenshots/audit.png) | **Zonen-Matrix**: Regeln je Zonenpaar<br>![Zonen-Matrix](docs/screenshots/zone-matrix.png) |
+| **Beziehungen**: alle Regeln zu einem Objekt<br>![Fokus-Graph](docs/screenshots/graph-focus.png) | **Änderungen**: Diff mit Verursacher<br>![Änderungen](docs/screenshots/changes.png) |
+| **Logs**: Filter per Klick und CIDR<br>![Logs](docs/screenshots/logs.png) | **Standortübergreifend**: wo fehlt die Regel?<br>![Standortübergreifend](docs/screenshots/cross-site.png) |
+
+*Die Screenshots zeigen Beispieldaten.*
+
+---
+
+## Wie es funktioniert
+
+```
+                ┌──────────────────────── Docker Compose ─────────────────────────┐
+ Browser ──────►│ web (nginx, TLS) ───► api (FastAPI) ──┐                          │
+                │                                         ├──► db (PostgreSQL +     │
+ Sophos XGS ◄───│ collector ── SNMP v3 / XML-API ─────────┤        TimescaleDB)       │
+ Sophos XGS ───►│ collector ◄─ Syslog UDP/TCP 5514 ───────┘                          │
+                └──────────────────────────────────────────────────────────────────┘
+```
+
+| Daten | Quelle | Standard-Intervall |
 |---|---|---|
-| CPU, RAM, Disk, Swap, Uptime, Live-User, Modell/Firmware | SNMP v3 (SFOS-MIB, HOST-RESOURCES-MIB) | Standard 60 s |
-| Interface-Durchsatz und -Status | SNMP v3 (IF-MIB, 64-Bit-Zähler) | Standard 60 s |
-| Firewall-/NAT-Regeln, Gruppen, Interfaces, Zonen, Hosts, Dienste, VPN, Routen | XML-API | Standard 15 min |
-| Konfigurationsänderungen (hinzugefügt/geändert/entfernt) | Vergleich der XML-API-Abrufe | mit jedem Abruf |
-| Logs (alle Kategorien), Volltextsuche | Syslog UDP/TCP 5514 | laufend |
-| **Regelnutzung**: Treffer, Blockierungen, Bytes/Pakete gesendet/empfangen, zuletzt genutzt, Top-Quellen/-Ziele/-Ports | aus den Firewall-Logs aggregiert (stündlich) | laufend |
+| CPU, RAM, Disk, Swap, Uptime, Live-User, Modell, Firmware | SNMP v3 (SFOS-MIB, HOST-RESOURCES-MIB) | 60 s |
+| Interface-Durchsatz und -Status | SNMP v3 (IF-MIB, 64-Bit-Zähler) | 60 s |
+| Regeln, NAT, Objekte, Zonen, Interfaces, VPN, Routen | XML-API | 15 min |
+| Konfigurationsänderungen | Vergleich der XML-API-Abrufe | mit jedem Abruf |
+| Logs, Regelnutzung, Admin-Events | Syslog | laufend |
 
-> Die SFOS-XML-API liefert nur Konfiguration, keine Zähler. Deshalb kommen Live-Werte per SNMP
-> und Regelnutzung aus den Logs. Für eine Regel wird Nutzung nur erfasst, wenn dort
-> **„Log firewall traffic“** aktiv ist. Die Werte beginnen mit dem ersten empfangenen Log.
+> **Warum drei Quellen?** Die SFOS-XML-API liefert nur Konfiguration, keine Zähler. Live-Werte kommen
+> deshalb per SNMP, die Regelnutzung wird aus den Firewall-Logs berechnet.
 
-## Architektur
+| Komponente | Technik |
+|---|---|
+| Backend | Python 3.13, FastAPI, SQLAlchemy 2.1 (async), Pydantic v2, pysnmp 7, httpx |
+| Frontend | React 19, TypeScript, Vite, TanStack Query, shadcn/ui (Radix), Tailwind CSS 4, Recharts, React Flow |
+| Datenbank | PostgreSQL 17 mit TimescaleDB (Hypertables, Aufbewahrung, Kompression) |
+| Auslieferung | nginx mit TLS, Docker Compose |
 
-```
-            ┌───────────── Docker Compose ─────────────────────────────┐
-Browser ──► │ web (nginx, TLS) ──► api (FastAPI) ──┐                    │
-            │                                       ├──► db (PostgreSQL │
-XGS ──SNMP/XML-API◄── collector (Scheduler) ────────┤     + TimescaleDB)│
-XGS ──Syslog 5514──►  collector (Syslog-Empfang) ───┘                    │
-            └──────────────────────────────────────────────────────────┘
-```
+---
 
-- **Backend**: Python 3.13, FastAPI, SQLAlchemy 2.1 (async), Pydantic v2, pysnmp 7, httpx
-- **Frontend**: React 19, TypeScript, Vite, TanStack Query, Recharts, Tailwind CSS 4
-- **Datenbank**: TimescaleDB-Hypertables mit automatischer Aufbewahrung und Kompression
-- **Collector** läuft als eigener Prozess: Er fragt jede Firewall in ihrem eigenen Intervall ab, wiederholt Fehler erst nach Ablauf des Intervalls und reagiert auf „Jetzt abrufen“.
+## Schnellstart (Docker Compose)
 
-## Sicherheit
-
-- Lokale Benutzer mit **Argon2id**-Passwörtern und optionaler **TOTP-2FA**
-- Rollen **Administrator** (Verwaltung) und **Betrachter** (nur lesen)
-- Serverseitige Sessions; das Cookie ist `HttpOnly`, `Secure` und `SameSite=Strict`, gespeichert wird nur der SHA-256-Hash des Tokens
-- CSRF-Schutz über einen Pflicht-Header bei allen schreibenden Requests
-- Kontosperre nach 5 Fehlversuchen für 15 Minuten
-- Firewall-Zugangsdaten und TOTP-Secrets werden mit **Fernet** (AES) verschlüsselt gespeichert
-- XML-Antworten werden mit `defusedxml` geparst (Schutz vor XXE)
-- Syslog von unbekannten Absendern wird verworfen
-- nginx: nur TLS 1.2/1.3, HSTS, CSP und weitere Security-Header
-
-## Installation
-
-Voraussetzungen: ein Linux-Server oder eine VM mit Docker und Docker Compose.
+**Voraussetzungen:** Linux-Server oder VM mit Docker und Docker Compose, Netzwerkzugriff auf die Firewalls.
 
 ```bash
+git clone https://github.com/bluecraank/SophosStats.git
+cd SophosStats
 cp .env.example .env
-# ENCRYPTION_KEY erzeugen und in .env eintragen:
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-#   (alternativ: docker run --rm python:3.13-slim sh -c "pip -q install cryptography && python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'")
-# Außerdem POSTGRES_PASSWORD und INITIAL_ADMIN_PASSWORD (mind. 12 Zeichen) setzen
+```
 
+Schlüssel erzeugen und in die `.env` eintragen:
+
+```bash
+docker run --rm python:3.13-slim sh -c \
+  "pip -q install cryptography && python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+```
+
+Pflichtwerte in der `.env`: `POSTGRES_PASSWORD`, `ENCRYPTION_KEY` und `INITIAL_ADMIN_PASSWORD` (mindestens 12 Zeichen).
+
+```bash
 docker compose up -d --build
 ```
 
-Danach `https://<server>` öffnen und mit dem Admin aus der `.env` anmelden. Danach solltest du unter **Konto** direkt 2FA einrichten.
+Danach `https://<server>` öffnen und mit `admin` und dem Passwort aus der `.env` anmelden. Unter **Konto**
+solltest du direkt 2FA einrichten.
 
-Ohne eigenes Zertifikat erzeugt der Web-Container ein selbstsigniertes. Für ein eigenes Zertifikat legst du `certs/tls.crt` und `certs/tls.key` ab und startest neu.
+> Ohne eigenes Zertifikat erzeugt der Web-Container beim ersten Start ein selbstsigniertes. Ein eigenes
+> Zertifikat legst du als `tls.crt` und `tls.key` in das Volume `certs` und startest den Container neu.
 
-**Ports:** 443/80 (Web, änderbar über `HTTPS_PORT`/`HTTP_PORT`), 5514 UDP und TCP (Syslog von den Firewalls).
+**Ports**
 
-### Portainer
+| Port | Zweck |
+|---|---|
+| 443/tcp (`HTTPS_PORT`) | Weboberfläche |
+| 80/tcp (`HTTP_PORT`) | Weiterleitung auf HTTPS |
+| 5514/udp, 5514/tcp | Syslog von den Firewalls |
 
-*Stacks → Add stack → Repository*:
+---
 
-- Repository URL: `https://github.com/bluecraank/SophosStats`, bei privatem Repo mit Authentifizierung (GitHub-Benutzer und Personal Access Token mit Leserecht)
-- Reference: `refs/heads/main`, Compose path: `docker-compose.yml`
-- Unter *Environment variables* mindestens `POSTGRES_PASSWORD`, `ENCRYPTION_KEY` und `INITIAL_ADMIN_PASSWORD` setzen, optional die übrigen Werte aus `.env.example`
+## Deployment mit Portainer
 
-Eine `.env`-Datei ist dafür nicht nötig.
+1. *Stacks → Add stack → Repository*
+2. Repository URL: `https://github.com/bluecraank/SophosStats`. Bei privatem Repo die Authentifizierung mit GitHub-Benutzer und Personal Access Token (Leserecht) einrichten.
+3. Reference `refs/heads/main`, Compose path `docker-compose.yml`
+4. Unter **Environment variables** mindestens `POSTGRES_PASSWORD`, `ENCRYPTION_KEY` und `INITIAL_ADMIN_PASSWORD` setzen. Eine `.env`-Datei ist nicht nötig.
+5. Für Updates: **Pull and redeploy** mit aktiviertem Neubau der Images
+
+---
+
+## Konfiguration
+
+Alle Einstellungen sind Umgebungsvariablen. Lokal kommen sie aus der `.env`, in Portainer aus den Stack-Variablen.
+
+| Variable | Pflicht | Standard | Bedeutung |
+|---|---|---|---|
+| `POSTGRES_PASSWORD` | ja | – | Passwort der Datenbank |
+| `ENCRYPTION_KEY` | ja | – | Fernet-Schlüssel für gespeicherte Zugangsdaten und 2FA-Secrets. **Nicht verlieren.** |
+| `INITIAL_ADMIN_USERNAME` | | `admin` | Erster Admin, wird nur angelegt, solange es keine Benutzer gibt |
+| `INITIAL_ADMIN_PASSWORD` | beim ersten Start | – | Passwort des ersten Admins |
+| `HTTPS_PORT` / `HTTP_PORT` | | `443` / `80` | Ports auf dem Host, auch für die HTTP→HTTPS-Weiterleitung |
+| `SESSION_TTL_HOURS` | | `12` | Gültigkeit einer Anmeldung |
+| `RETENTION_METRICS_DAYS` | | `90` | Aufbewahrung von CPU/RAM/Interface-Werten |
+| `RETENTION_LOGS_DAYS` | | `30` | Aufbewahrung der Logs |
+| `RETENTION_RULE_USAGE_DAYS` | | `400` | Aufbewahrung der stündlichen Regelnutzung |
+
+Firewalls, Zugangsdaten und Abruf-Intervalle pflegst du in der Oberfläche unter **Firewalls verwalten**.
+
+---
 
 ## Einrichtung auf der Sophos XGS
 
-1. **XML-API**: *Backup & firmware → API* aktivieren und die IP des SophosStats-Servers als *Allowed IP address* eintragen. Am besten einen eigenen Admin-Benutzer mit Leserechten anlegen.
-2. **SNMP v3**: *Administration → SNMP* den Agent aktivieren und einen SNMPv3-Benutzer anlegen (Auth SHA256, Verschlüsselung AES). Unter *Administration → Device access* SNMP für die Zone erlauben, in der der Server steht.
-3. **Syslog**: *System services → Log settings* einen Syslog-Server hinzufügen: Server-IP, Port 5514, UDP oder TCP, Format *Device standard format*. Mindestens die Kategorie *Firewall* aktivieren, sinnvoll sind zusätzlich IPS, Web, VPN, Authentication und Admin.
-4. **Regeln**: in allen Regeln, deren Nutzung du sehen willst, *Log firewall traffic* einschalten.
-5. In SophosStats unter **Firewalls verwalten** die Firewall anlegen und **Verbindung testen** klicken.
+| Schritt | Wo auf der XGS | Wofür |
+|---|---|---|
+| **XML-API aktivieren** | *Backup & firmware → API*: aktivieren, IP des SophosStats-Servers als *Allowed IP* eintragen | Regeln, Objekte, Konfiguration |
+| **API-Benutzer** | Eigenen Admin mit Profil *Read-only* anlegen, mindestens die Bereiche **Firewall, Objects, Network, VPN** | Ohne Leserechte erscheint ein Hinweis mit den fehlenden Bereichen |
+| **SNMP v3** | *Administration → SNMP*: Agent aktivieren, v3-Benutzer (Auth SHA256, Verschlüsselung AES). *Device access*: SNMP für die Zone des Servers erlauben | CPU, RAM, Interfaces |
+| **Syslog** | *System services → Log settings*: Syslog-Server mit IP des Servers, Port `5514`, UDP oder TCP, Format **Device standard format** | Logs und Regelnutzung |
+| **Log-Kategorien** | Beim Syslog-Server mindestens **Firewall** sowie **Events → Admin events** anhaken, optional IPS, Web, VPN, Authentication | Admin-Events für „wer hat geändert“ |
+| **Regel-Logging** | In jeder Regel *Log firewall traffic* einschalten, auch in Drop-Regeln | Treffer, Bytes, ungenutzte Regeln, blockierte Verbindungen |
 
-Logs werden einer Firewall über die Absender-IP zugeordnet. Das ist standardmäßig der Host, abweichend das Feld „Absender-IP der Logs“. Falls Docker die Quell-IP verschleiert (etwa bei rootless Docker), setzt du den Collector auf `network_mode: host`.
+Danach unter **Firewalls verwalten** die Firewall anlegen und **Verbindung testen** klicken.
+
+> Logs werden einer Firewall über die **Absender-IP** zugeordnet, standardmäßig über den eingetragenen Host.
+> Schickt die Firewall Syslog von einer anderen IP, trägst du diese im Feld *Absender-IP der Logs* ein. Logs von unbekannten IPs werden verworfen.
+
+### Standortübergreifende Auswertung
+
+Voraussetzungen:
+- Alle beteiligten Firewalls schicken ihre Logs an SophosStats.
+- Zwischen den Standorten wird **nicht genattet** (z. B. WireGuard oder IPsec mit IP-Forwarding).
+- Die Uhrzeit ist synchron (NTP).
+
+Die internen Netze jedes Standorts werden automatisch aus den Interfaces, VLANs und Aliasen erkannt. Fehlende
+Netze, etwa hinter einem weiteren Router, ergänzt du unter *Firewalls verwalten → Zusätzliche Standort-Netze*.
+Interface- und Zonennamen müssen auf den Firewalls **nicht** gleich sein, die Zuordnung läuft nur über die IPs.
+
+---
+
+## Sicherheit
+
+- Passwörter mit **Argon2id**, optional **TOTP-2FA**, Konto-Sperre nach 5 Fehlversuchen
+- Serverseitige Sessions im Cookie (`HttpOnly`, `Secure`, `SameSite=Strict`). In der Datenbank liegt nur ein Hash des Tokens.
+- CSRF-Schutz über einen Pflicht-Header bei allen schreibenden Requests
+- Firewall-Zugangsdaten und 2FA-Secrets werden verschlüsselt gespeichert (Fernet/AES)
+- XML-Antworten werden mit `defusedxml` geparst (Schutz vor XXE). Log-Filter laufen über Whitelists und Bind-Parameter.
+- nginx: TLS 1.2/1.3, HSTS, Content-Security-Policy und weitere Security-Header
+- Rollen: **Administrator** (Verwaltung, Abruf auslösen, Befunde akzeptieren) und **Betrachter** (nur lesen)
+
+---
+
+## Betrieb: Updates, Backup, Datenhaltung
+
+**Update**
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Neue Tabellen und Spalten werden beim Start automatisch angelegt.
+
+**Backup:** Wichtig sind das Docker-Volume `db-data` und der `ENCRYPTION_KEY`. Ohne den Schlüssel sind
+gespeicherte Firewall-Zugangsdaten und 2FA-Secrets unbrauchbar.
+
+```bash
+docker compose exec db pg_dump -U sophosstats sophosstats | gzip > sophosstats-$(date +%F).sql.gz
+```
+
+**Datenhaltung:** TimescaleDB löscht alte Daten automatisch (`RETENTION_*`) und komprimiert Daten, die älter als 7 Tage sind.
+
+**API:** Die interaktive API-Dokumentation (OpenAPI) steht unter `https://<server>/api/docs`. Die Endpunkte selbst
+erfordern eine Anmeldung.
+
+---
+
+## Fehlerbehebung
+
+| Problem | Lösung |
+|---|---|
+| Portainer: *„.env not found“* | Variablen unter *Environment variables* des Stacks setzen, eine `.env`-Datei wird nicht benötigt |
+| Container `db` ist *unhealthy* | `docker logs <db-container>` prüfen. Nach einem fehlgeschlagenen Erst-Start das Volume `db-data` löschen und neu deployen. |
+| HTTP-Weiterleitung landet auf falschem Port | `HTTPS_PORT` auf den tatsächlich genutzten Port setzen |
+| *„599 You do not have permission“* | Dem Admin-Profil des API-Benutzers Leserechte für den genannten Bereich geben |
+| Keine Regelnutzung / „nie genutzt“ | *Log firewall traffic* in den Regeln aktivieren und prüfen, ob Syslog ankommt (Status „Syslog“ in der Übersicht) |
+| Bei Änderungen steht „Benutzer unbekannt“ | Log-Kategorie **Admin events** am Syslog-Server aktivieren. Der Änderungen-Tab zeigt einen Hinweis, wenn keine Admin-Events ankommen. |
+| SNMP liefert keine Werte | SNMP in *Device access* für die Zone des Servers erlauben, Protokolle und Passwörter des v3-Benutzers prüfen |
+| Neue Funktionen fehlen nach einem Update | Images neu bauen (`--build` bzw. *Re-build* in Portainer) und den Browser-Cache leeren |
+
+---
 
 ## Entwicklung
 
 ```bash
+# Datenbank
+docker run -d -p 5432:5432 -e POSTGRES_USER=sophosstats -e POSTGRES_PASSWORD=sophosstats timescale/timescaledb:latest-pg17
+
 # Backend
 cd backend
-python -m venv .venv && .venv/Scripts/activate      # Linux: source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e . pytest pytest-asyncio ruff
-# Eine PostgreSQL/TimescaleDB-Instanz bereitstellen, z.B.:
-docker run -d -p 5432:5432 -e POSTGRES_USER=sophosstats -e POSTGRES_PASSWORD=sophosstats timescale/timescaledb:latest-pg17
-# .env im backend-Ordner: ENCRYPTION_KEY=..., INITIAL_ADMIN_PASSWORD=..., COOKIE_SECURE=false
-uvicorn app.main:app --reload          # API auf :8000, Doku unter /api/docs
-python -m app.collector                # Collector
+# backend/.env: ENCRYPTION_KEY=…, INITIAL_ADMIN_PASSWORD=…, COOKIE_SECURE=false
+uvicorn app.main:app --reload        # API auf :8000
+python -m app.collector              # Collector (SNMP, XML-API, Syslog)
 pytest && ruff check app tests
 
 # Frontend
 cd frontend
 npm install
-npm run dev                            # http://localhost:5173, /api wird an :8000 weitergeleitet
+npm run dev                          # http://localhost:5173, /api wird an :8000 weitergeleitet
 ```
 
-## Bekannte Grenzen / gegen eine echte Firewall zu prüfen
+**Projektstruktur**
 
-- **Log-Felder**: Der Parser erwartet das SFOS-Format „Device standard format“ (`key="value"`) mit den Feldern `fw_rule_id`, `fw_rule_name`, `sent_bytes`/`recv_bytes`, `sent_pkts`/`recv_pkts` und optional `con_event`. Gibt es `con_event`, zählt jede Verbindung beim Start als Treffer, und die Bytes werden beim Ende gezählt. Ohne `con_event` zählt jeder Logeintrag. Diese Logik steht in [backend/app/collectors/sfos_log.py](backend/app/collectors/sfos_log.py) und muss gegen echte Logs deiner Firmware geprüft werden.
-- **Regelzuordnung**: Logs werden über den **Regelnamen** (`fw_rule_name`) mit den per XML-API abgerufenen Regeln verknüpft. Fehlt der Name im Log, landet die Nutzung unter „Nutzung ohne Regelzuordnung“ und ist nach Regel-ID aufgeführt.
-- **CPU**: Die Auslastung kommt aus `hrProcessorLoad` (HOST-RESOURCES-MIB), ersatzweise aus UCD `ssCpuIdle`. Die OIDs stehen zentral in [backend/app/collectors/snmp.py](backend/app/collectors/snmp.py).
-- **Schema**: Tabellen werden beim Start angelegt (`create_all`). Für spätere Schemaänderungen sollte Alembic eingeführt werden.
+```
+backend/
+  app/
+    api/          REST-Endpunkte (auth, firewalls, stats, compliance, graph, crosssite, …)
+    collectors/   SNMP, XML-API, Syslog-Empfang, Poller
+    services/     reine Logik: Audit, Graph, Log-Filter, Konfig-Historie, Standorte
+    collector.py  Hintergrund-Prozess (Scheduler + Syslog)
+  tests/
+frontend/
+  src/
+    components/   Layout, Diagramme, Diff-Ansicht, Filter, shadcn/ui-Komponenten
+    pages/        Seiten und Firewall-Tabs
+docs/screenshots/ Bilder für diese README
+```
+
+---
+
+## Bekannte Grenzen
+
+- **Regelnutzung** gibt es nur für Regeln mit aktivem Logging und erst ab dem ersten empfangenen Log.
+- **Log-Format:** Der Parser erwartet das *Device standard format*. Die Feldnamen stammen aus der SFOS-Dokumentation, nicht jede Firmware-Version ist geprüft.
+- **Verdeckte/redundante Regeln** werden über Objektnamen verglichen. Gruppeninhalte und überlappende IP-Bereiche werden nicht aufgelöst, deshalb werden nur eindeutige Fälle gemeldet.
+- **Standortübergreifend** setzt voraus, dass zwischen den Standorten nicht genattet wird.
+- **Konfigurationshistorie** beginnt mit dem ersten Abruf.
+- **Datenbank-Migrationen** werden beim Start automatisch ergänzt. Für größere Schemaänderungen ist Alembic vorgesehen.
