@@ -137,9 +137,15 @@ async def poll_config(fw_id: int) -> None:
         existing_rows = (await db.execute(select(ConfigObject).where(ConfigObject.firewall_id == fw.id))).scalars()
         existing: dict[tuple[str, str], ConfigObject] = {(o.entity_type, o.name): o for o in existing_rows}
         first_snapshot = not existing
-        errors = []
+        errors, no_permission = [], []
 
         for res in results:
+            if res.unsupported:
+                # Entität gibt es in dieser Firmware nicht (z.B. alter/neuer Name) – still überspringen
+                continue
+            if res.no_permission:
+                no_permission.append(res.entity)
+                continue
             if res.error:
                 errors.append(f"{res.entity}: {res.error}")
                 continue
@@ -197,6 +203,11 @@ async def poll_config(fw_id: int) -> None:
         fw.api_version = api.api_version or fw.api_version
         fw.last_config_at = now
         fw.last_config_error = "; ".join(errors)[:1000] or None
+        fw.last_config_warning = (
+            f"Keine Leserechte für: {', '.join(no_permission)} (Admin-Profil des API-Benutzers prüfen)"
+            if no_permission
+            else None
+        )
         await db.commit()
 
 

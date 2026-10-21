@@ -116,6 +116,7 @@ class FirewallOut(FirewallBase):
     last_metrics_error: str | None
     last_config_at: datetime | None
     last_config_error: str | None
+    last_config_warning: str | None
     last_log_at: datetime | None
     created_at: datetime
 

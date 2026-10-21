@@ -23,9 +23,13 @@ export function SourceBadges({ fw }: { fw: Firewall }) {
         title={fw.last_metrics_error ?? undefined}
       />
       <StatusBadge
-        status={sourceStatus(fw.last_config_at, fw.last_config_error, fw.config_interval_s)}
+        status={
+          !fw.last_config_error && fw.last_config_warning
+            ? "warning"
+            : sourceStatus(fw.last_config_at, fw.last_config_error, fw.config_interval_s)
+        }
         label={`API ${fmtRelative(fw.last_config_at)}`}
-        title={fw.last_config_error ?? undefined}
+        title={fw.last_config_error ?? fw.last_config_warning ?? undefined}
       />
       <StatusBadge
         status={fw.last_log_at ? sourceStatus(fw.last_log_at, null, 600) : "warning"}

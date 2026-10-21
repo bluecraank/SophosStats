@@ -12,8 +12,9 @@ from xml.sax.saxutils import escape
 import httpx
 from defusedxml import ElementTree
 
-# Entitäten, die regelmäßig gesichert werden. Nicht jede Firmware kennt alle – unbekannte
-# Entitäten liefern einen Fehlerstatus und werden übersprungen.
+# Entitäten, die regelmäßig gesichert werden. Nicht jede Firmware kennt alle (529) und nicht jedes
+# Admin-Profil darf alle lesen (599) – beides wird als Hinweis vermerkt, nicht als Fehler.
+# Bei umbenannten Entitäten stehen alte und neue Namen in der Liste.
 CONFIG_ENTITIES = [
     "FirewallRule",
     "FirewallRuleGroup",
@@ -26,10 +27,15 @@ CONFIG_ENTITIES = [
     "FQDNHost",
     "Services",
     "ServiceGroup",
+    "VPNIPSecConnection",
     "IPSecConnection",
+    "GatewayHost",
     "Gateway",
     "UnicastRoute",
 ]
+
+STATUS_NO_PERMISSION = "599"
+STATUS_UNKNOWN_ENTITY = "529"
 
 
 class XmlApiError(Exception):
@@ -41,6 +47,15 @@ class EntityResult:
     entity: str
     items: list[dict[str, Any]]
     error: str | None = None
+    code: str | None = None
+
+    @property
+    def no_permission(self) -> bool:
+        return self.code == STATUS_NO_PERMISSION
+
+    @property
+    def unsupported(self) -> bool:
+        return self.code == STATUS_UNKNOWN_ENTITY
 
 
 def element_to_value(el: Element) -> Any:
@@ -98,14 +113,12 @@ class SophosXmlApi:
     async def test(self) -> str | None:
         """Prüft Login. Gibt die API-Version zurück."""
         async with self._client() as client:
-            await self._call(client, "<Get><Zone></Zone></Get>")
+            await self._call(client, "<Get><FirewallRule></FirewallRule></Get>")
         return self.api_version
 
     async def get_entity(self, client: httpx.AsyncClient, entity: str) -> EntityResult:
         try:
             root = await self._call(client, f"<Get><{entity}></{entity}></Get>")
-        except XmlApiError:
-            raise
         except (httpx.HTTPError, ElementTree.ParseError) as exc:
             return EntityResult(entity, [], f"{type(exc).__name__}: {exc}")
 
@@ -117,12 +130,15 @@ class SophosXmlApi:
                 if set(value) == {"Status"}:
                     continue
                 items.append(value)
-        error = None
+        error = code = None
         if not items:
             st = root.find(f"{entity}/Status")
+            if st is None:
+                st = root.find("Status")
             if st is not None and st.get("code") not in (None, "200", "526"):
-                error = f"{st.get('code')} {(st.text or '').strip()}"
-        return EntityResult(entity, items, error)
+                code = st.get("code")
+                error = f"{code} {(st.text or '').strip()}"
+        return EntityResult(entity, items, error, code)
 
     async def get_config(self, entities: list[str] | None = None) -> list[EntityResult]:
         results = []

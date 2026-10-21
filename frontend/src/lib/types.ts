@@ -34,6 +34,7 @@ export interface Firewall {
   last_metrics_error: string | null;
   last_config_at: string | null;
   last_config_error: string | null;
+  last_config_warning: string | null;
   last_log_at: string | null;
   created_at: string;
 }

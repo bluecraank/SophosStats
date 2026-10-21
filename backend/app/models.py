@@ -96,6 +96,7 @@ class Firewall(Base):
     last_metrics_error: Mapped[str | None] = mapped_column(Text)
     last_config_at: Mapped[datetime | None] = _ts(nullable=True)
     last_config_error: Mapped[str | None] = mapped_column(Text)
+    last_config_warning: Mapped[str | None] = mapped_column(Text)
     last_log_at: Mapped[datetime | None] = _ts(nullable=True)
     poll_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = _ts(server_default=func.now())

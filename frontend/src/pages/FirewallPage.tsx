@@ -68,6 +68,11 @@ export function FirewallPage() {
           {f.last_config_error && <div><strong>XML-API:</strong> {f.last_config_error}</div>}
         </div>
       )}
+      {f.last_config_warning && (
+        <div className="rounded-md border border-warning/50 bg-warning/10 px-3 py-2 text-sm" role="status">
+          <strong>Hinweis XML-API:</strong> {f.last_config_warning}
+        </div>
+      )}
       <Tabs tabs={[...TABS]} value={tab} onChange={(t) => setParams({ tab: t }, { replace: true })} />
       {tab === "overview" && <OverviewTab fwId={id} />}
       {tab === "traffic" && <TrafficTab fwId={id} />}

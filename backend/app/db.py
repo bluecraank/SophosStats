@@ -33,6 +33,10 @@ _HYPERTABLES = [
 
 _SCHEMA_LOCK_ID = 727274001
 
+_ADDED_COLUMNS = [
+    "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS last_config_warning TEXT",
+]
+
 
 async def init_schema() -> None:
     """Legt Tabellen an und richtet TimescaleDB ein. API und Collector rufen das beim Start auf,
@@ -50,6 +54,9 @@ async def init_schema() -> None:
             log.warning("TimescaleDB nicht verfügbar – Retention/Kompression deaktiviert")
             timescale = False
         await conn.run_sync(Base.metadata.create_all)
+        # create_all ergänzt keine Spalten in bestehenden Tabellen – nachträglich hinzugekommene hier nachziehen
+        for stmt in _ADDED_COLUMNS:
+            await conn.execute(text(stmt))
 
         if not timescale:
             return
