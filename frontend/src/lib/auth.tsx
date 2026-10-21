@@ -18,7 +18,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryKey: ["me"],
     queryFn: async () => {
       try {
-        return await api<User>("/api/auth/me");
+        return await api<User | null>("/api/auth/me");
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) return null;
         throw e;

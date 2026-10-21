@@ -79,9 +79,15 @@ async def logout(request: Request, response: Response, db: DB, _user: CurrentUse
     response.delete_cookie(name, path="/")
 
 
-@router.get("/me", response_model=UserOut)
-async def me(user: CurrentUser) -> User:
-    return user
+@router.get("/me", response_model=UserOut | None)
+async def me(request: Request, db: DB) -> User | None:
+    """Angemeldeter Benutzer oder null – kein 401, damit der Login-Check beim Laden keinen Fehler erzeugt."""
+    try:
+        return await security.current_user(request, db)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            return None
+        raise
 
 
 @router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
