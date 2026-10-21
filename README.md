@@ -61,7 +61,17 @@ Danach `https://<server>` öffnen und mit dem Admin aus der `.env` anmelden. Dan
 
 Ohne eigenes Zertifikat erzeugt der Web-Container ein selbstsigniertes. Für ein eigenes Zertifikat legst du `certs/tls.crt` und `certs/tls.key` ab und startest neu.
 
-**Ports:** 443/80 (Web), 5514 UDP und TCP (Syslog von den Firewalls).
+**Ports:** 443/80 (Web, änderbar über `HTTPS_PORT`/`HTTP_PORT`), 5514 UDP und TCP (Syslog von den Firewalls).
+
+### Portainer
+
+*Stacks → Add stack → Repository*:
+
+- Repository URL: `https://github.com/bluecraank/SophosStats`, bei privatem Repo mit Authentifizierung (GitHub-Benutzer und Personal Access Token mit Leserecht)
+- Reference: `refs/heads/main`, Compose path: `docker-compose.yml`
+- Unter *Environment variables* mindestens `POSTGRES_PASSWORD`, `ENCRYPTION_KEY` und `INITIAL_ADMIN_PASSWORD` setzen, optional die übrigen Werte aus `.env.example`
+
+Eine `.env`-Datei ist dafür nicht nötig.
 
 ## Einrichtung auf der Sophos XGS
 

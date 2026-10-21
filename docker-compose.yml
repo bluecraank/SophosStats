@@ -1,11 +1,20 @@
 name: sophosstats
 
+# Alle Einstellungen kommen aus Umgebungsvariablen: lokal aus der .env neben dieser Datei,
+# in Portainer aus den "Environment variables" des Stacks.
+
 x-backend: &backend
   build: ./backend
   restart: unless-stopped
-  env_file: .env
   environment:
     DATABASE_URL: postgresql+asyncpg://sophosstats:${POSTGRES_PASSWORD}@db:5432/sophosstats
+    ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY setzen}
+    INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-admin}
+    INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+    SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+    RETENTION_METRICS_DAYS: ${RETENTION_METRICS_DAYS:-90}
+    RETENTION_LOGS_DAYS: ${RETENTION_LOGS_DAYS:-30}
+    RETENTION_RULE_USAGE_DAYS: ${RETENTION_RULE_USAGE_DAYS:-400}
   depends_on:
     db:
       condition: service_healthy
@@ -16,7 +25,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: sophosstats
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD setzen}
       POSTGRES_DB: sophosstats
     volumes:
       - db-data:/var/lib/postgresql/data
@@ -47,11 +56,13 @@ services:
     depends_on:
       - api
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     volumes:
-      # Eigenes Zertifikat: tls.crt + tls.key in ./certs ablegen (sonst wird ein selbstsigniertes erzeugt)
-      - ./certs:/etc/nginx/certs
+      # Ohne eigenes Zertifikat wird beim ersten Start ein selbstsigniertes erzeugt.
+      # Eigenes Zertifikat: tls.crt + tls.key in dieses Volume legen und den Container neu starten.
+      - certs:/etc/nginx/certs
 
 volumes:
   db-data:
+  certs:
