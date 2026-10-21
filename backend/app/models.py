@@ -125,6 +125,8 @@ class ConfigChange(Base):
     entity_type: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(String(255))
     action: Mapped[str] = mapped_column(String(16))  # added | removed | modified
+    # Zeitpunkt des vorherigen Abrufs: die Änderung erfolgte irgendwann zwischen window_start und time
+    window_start: Mapped[datetime | None] = _ts(nullable=True)
     old: Mapped[dict | None] = mapped_column(JSONB)
     new: Mapped[dict | None] = mapped_column(JSONB)
 

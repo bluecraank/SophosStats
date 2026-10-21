@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, text
 
-from app.api import auth, firewalls, stats, users
+from app.api import auth, compliance, firewalls, stats, users
 from app.config import get_settings
 from app.db import SessionLocal, init_schema
 from app.models import Role, User
@@ -69,7 +69,7 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-for r in (auth.router, users.router, firewalls.router, stats.router):
+for r in (auth.router, users.router, firewalls.router, stats.router, compliance.router):
     app.include_router(r)
 
 

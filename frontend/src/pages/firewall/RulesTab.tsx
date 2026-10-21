@@ -243,6 +243,66 @@ function RuleDetail({ fwId, ruleId, hours }: { fwId: number; ruleId: number; hou
         <TopList fwId={fwId} ruleId={ruleId} hours={hours} by="dst_ip" title="Top-Ziele" />
         <TopList fwId={fwId} ruleId={ruleId} hours={hours} by="dst_port" title="Top-Zielports" />
       </div>
+      <RuleProfile fwId={fwId} ruleId={ruleId} hours={hours} />
+    </div>
+  );
+}
+
+interface Profile {
+  distinct: { sources: number; destinations: number; ports: number; pairs: number };
+  ports: { protocol: string | null; port: number; hits: number }[];
+  flows: { src_ip: string; dst_ip: string; dst_port: number | null; protocol: string | null; hits: number; bytes: number; last_seen: string }[];
+}
+
+/** Was die Regel tatsächlich durchlässt – Grundlage, um eine zu breite Regel einzuschränken. */
+function RuleProfile({ fwId, ruleId, hours }: { fwId: number; ruleId: number; hours: number }) {
+  const q = useQuery({
+    queryKey: ["rule-profile", fwId, ruleId, hours],
+    queryFn: () => api<Profile>(`/api/firewalls/${fwId}/rules/${ruleId}/profile`, { params: { hours } }),
+  });
+  if (!q.data) return null;
+  const p = q.data;
+  return (
+    <div className="rounded-md border border-line bg-surface p-3">
+      <div className="mb-2 text-xs font-medium text-ink-2">Nutzungsprofil – was diese Regel tatsächlich erlaubt</div>
+      <p className="mb-3 text-sm">
+        <strong>{p.distinct.sources}</strong> Quellen · <strong>{p.distinct.destinations}</strong> Ziele ·{" "}
+        <strong>{p.distinct.pairs}</strong> Quelle→Ziel-Paare · <strong>{p.distinct.ports}</strong> Zielports
+      </p>
+      {p.ports.length > 0 && (
+        <p className="mb-3 text-xs text-ink-2">
+          Genutzte Dienste:{" "}
+          {p.ports.map((x) => `${x.protocol ?? "?"}/${x.port} (${fmtNumber(x.hits)}×)`).join(", ")}
+        </p>
+      )}
+      {p.flows.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-left text-ink-2">
+              <tr>
+                <th className="py-1 font-medium">Quelle</th>
+                <th className="py-1 font-medium">Ziel</th>
+                <th className="py-1 font-medium">Dienst</th>
+                <th className="py-1 text-right font-medium">Treffer</th>
+                <th className="py-1 text-right font-medium">Volumen</th>
+                <th className="py-1 text-right font-medium">Zuletzt</th>
+              </tr>
+            </thead>
+            <tbody className="font-mono">
+              {p.flows.map((f, i) => (
+                <tr key={i} className="border-t border-line">
+                  <td className="py-1">{f.src_ip}</td>
+                  <td className="py-1">{f.dst_ip}</td>
+                  <td className="py-1">{f.protocol ?? "?"}/{f.dst_port ?? "–"}</td>
+                  <td className="py-1 text-right">{fmtNumber(f.hits)}</td>
+                  <td className="py-1 text-right">{fmtBytes(f.bytes)}</td>
+                  <td className="py-1 text-right font-sans text-ink-2">{fmtRelative(f.last_seen)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

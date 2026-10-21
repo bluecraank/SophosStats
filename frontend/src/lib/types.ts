@@ -116,14 +116,47 @@ export interface LogItem {
   fields: Record<string, string>;
 }
 
+export interface ChangeActor {
+  time: string;
+  user: string | null;
+  src_ip: string | null;
+  via: string | null;
+  message: string;
+}
+
 export interface ConfigChange {
   id: number;
   time: string;
+  window_start: string | null;
   entity_type: string;
   name: string;
   action: "added" | "removed" | "modified";
   old: unknown;
   new: unknown;
+  actors: ChangeActor[];
+}
+
+export type FindingKind = "shadowed" | "redundant" | "too_broad" | "unused" | "no_logging" | "disabled";
+
+export interface AuditFinding {
+  kind: FindingKind;
+  severity: "high" | "medium" | "low" | "info";
+  rule: string;
+  rule_id: number | null;
+  position: number | null;
+  message: string;
+  covered_by?: string;
+  last_seen?: string;
+  profile?: { sources: number; destinations: number; ports: number };
+}
+
+export interface AuditResult {
+  unused_days: number;
+  data_since: string | null;
+  rule_count: number;
+  enabled_count: number;
+  summary: Partial<Record<FindingKind, number>>;
+  findings: AuditFinding[];
 }
 
 export interface TopEntry {

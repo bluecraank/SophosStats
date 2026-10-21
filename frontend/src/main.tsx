@@ -13,6 +13,8 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { FirewallPage } from "./pages/FirewallPage";
 import { LoginPage } from "./pages/LoginPage";
 import { LogsPage } from "./pages/LogsPage";
+import { ComparePage } from "./pages/ComparePage";
+import { ReportPage } from "./pages/ReportPage";
 import { UsersPage } from "./pages/UsersPage";
 
 const queryClient = new QueryClient({
@@ -39,6 +41,8 @@ const router = createBrowserRouter([
       { index: true, element: <DashboardPage /> },
       { path: "logs", element: <LogsPage /> },
       { path: "firewalls/:id", element: <FirewallPage /> },
+      { path: "firewalls/:id/report", element: <ReportPage /> },
+      { path: "compare", element: <ComparePage /> },
       { path: "account", element: <AccountPage /> },
       { path: "admin/firewalls", element: <AdminOnly><AdminFirewallsPage /></AdminOnly> },
       { path: "admin/users", element: <AdminOnly><UsersPage /></AdminOnly> },

@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams, useSearchParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { LogTable } from "../components/LogTable";
 import { ErrorBox, Loading, Tabs } from "../components/ui";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { Firewall } from "../lib/types";
 import { SourceBadges } from "./DashboardPage";
+import { AuditTab } from "./firewall/AuditTab";
 import { ChangesTab } from "./firewall/ChangesTab";
 import { ConfigTab } from "./firewall/ConfigTab";
 import { OverviewTab } from "./firewall/OverviewTab";
@@ -16,6 +17,7 @@ const TABS = [
   { id: "overview", label: "System" },
   { id: "traffic", label: "Interfaces" },
   { id: "rules", label: "Regeln" },
+  { id: "audit", label: "Audit" },
   { id: "logs", label: "Logs" },
   { id: "config", label: "Konfiguration" },
   { id: "changes", label: "Änderungen" },
@@ -56,11 +58,16 @@ export function FirewallPage() {
             <SourceBadges fw={f} />
           </div>
         </div>
-        {user?.role === "admin" && (
-          <button className="btn-secondary" onClick={() => poll.mutate()} disabled={poll.isPending}>
-            {poll.isSuccess ? "Abruf angefordert" : "Jetzt abrufen"}
-          </button>
-        )}
+        <div className="flex gap-2">
+          <Link to={`/firewalls/${id}/report`} className="btn-secondary">
+            Bericht
+          </Link>
+          {user?.role === "admin" && (
+            <button className="btn-secondary" onClick={() => poll.mutate()} disabled={poll.isPending}>
+              {poll.isSuccess ? "Abruf angefordert" : "Jetzt abrufen"}
+            </button>
+          )}
+        </div>
       </div>
       {(f.last_metrics_error || f.last_config_error) && (
         <div className="space-y-1 rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-sm">
@@ -77,6 +84,7 @@ export function FirewallPage() {
       {tab === "overview" && <OverviewTab fwId={id} />}
       {tab === "traffic" && <TrafficTab fwId={id} />}
       {tab === "rules" && <RulesTab fwId={id} />}
+      {tab === "audit" && <AuditTab fwId={id} />}
       {tab === "logs" && <LogTable fixed={{ firewall_id: id }} />}
       {tab === "config" && <ConfigTab fwId={id} />}
       {tab === "changes" && <ChangesTab fwId={id} />}

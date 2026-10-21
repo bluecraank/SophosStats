@@ -6,7 +6,7 @@ from sqlalchemy import and_, func, literal_column, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import distinct_on
 
 from app.api.firewalls import get_firewall
-from app.models import ConfigChange, ConfigObject, Firewall, InterfaceMetric, LogEntry, Metric, RuleUsageHourly
+from app.models import ConfigObject, Firewall, InterfaceMetric, LogEntry, Metric, RuleUsageHourly
 from app.schemas import FirewallOut
 from app.security import DB, CurrentUser
 from app.services.rules import rule_groups, summarize_rule
@@ -173,6 +173,11 @@ def _usage_dict(row) -> dict:
 async def rules(fw_id: int, db: DB, _user: CurrentUser, hours: Hours = 24 * 7) -> dict:
     """Konfigurierte Firewall-Regeln mit Nutzung im Zeitraum (aus den Logs aggregiert)."""
     await get_firewall(db, fw_id)
+    return {"hours": hours, **await rules_overview(db, fw_id, _since(hours))}
+
+
+async def rules_overview(db: DB, fw_id: int, start: datetime, end: datetime | None = None) -> dict:
+    """Regeln (Konfiguration) + Nutzung im Zeitraum [start, end]. Auch von Audit und Bericht genutzt."""
     objects = (
         (
             await db.execute(
@@ -189,12 +194,11 @@ async def rules(fw_id: int, db: DB, _user: CurrentUser, hours: Hours = 24 * 7) -
     )
     groups = rule_groups([o.data for o in objects if o.entity_type == "FirewallRuleGroup"])
 
+    range_filter = [RuleUsageHourly.firewall_id == fw_id, RuleUsageHourly.time >= start]
+    if end is not None:
+        range_filter.append(RuleUsageHourly.time < end)
     in_range = (
-        await db.execute(
-            select(*_usage_columns())
-            .where(RuleUsageHourly.firewall_id == fw_id, RuleUsageHourly.time > _since(hours))
-            .group_by(RuleUsageHourly.rule_id)
-        )
+        await db.execute(select(*_usage_columns()).where(*range_filter).group_by(RuleUsageHourly.rule_id))
     ).all()
     ever = (
         await db.execute(
@@ -232,7 +236,7 @@ async def rules(fw_id: int, db: DB, _user: CurrentUser, hours: Hours = 24 * 7) -
         for u in usage_by_id.values()
         if u["rule_id"] not in matched_ids
     ]
-    return {"hours": hours, "data_since": data_since, "rules": result, "unmapped_usage": unmapped}
+    return {"data_since": data_since, "rules": result, "unmapped_usage": unmapped}
 
 
 @router.get("/firewalls/{fw_id}/rules/{rule_id}/series")
@@ -331,38 +335,6 @@ async def config_objects(fw_id: int, entity_type: str, db: DB, _user: CurrentUse
         )
     ).scalars()
     return [{"name": o.name, "position": o.position, "data": o.data, "updated_at": o.updated_at} for o in rows]
-
-
-@router.get("/firewalls/{fw_id}/changes")
-async def changes(
-    fw_id: int,
-    db: DB,
-    _user: CurrentUser,
-    limit: Annotated[int, Query(ge=1, le=500)] = 100,
-    offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[dict]:
-    await get_firewall(db, fw_id)
-    rows = (
-        await db.execute(
-            select(ConfigChange)
-            .where(ConfigChange.firewall_id == fw_id)
-            .order_by(ConfigChange.time.desc(), ConfigChange.id.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-    ).scalars()
-    return [
-        {
-            "id": c.id,
-            "time": c.time,
-            "entity_type": c.entity_type,
-            "name": c.name,
-            "action": c.action,
-            "old": c.old,
-            "new": c.new,
-        }
-        for c in rows
-    ]
 
 
 def _escape_like(s: str) -> str:

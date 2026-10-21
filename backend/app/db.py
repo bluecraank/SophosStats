@@ -35,6 +35,7 @@ _SCHEMA_LOCK_ID = 727274001
 
 _ADDED_COLUMNS = [
     "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS last_config_warning TEXT",
+    "ALTER TABLE config_changes ADD COLUMN IF NOT EXISTS window_start TIMESTAMPTZ",
 ]
 
 

@@ -37,14 +37,14 @@ export function Layout() {
 
   return (
     <div className="min-h-screen md:flex">
-      <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3 md:hidden">
+      <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3 md:hidden print:hidden">
         <span className="font-semibold">SophosStats</span>
         <button className="btn-secondary" onClick={() => setOpen(!open)} aria-expanded={open}>
           Menü
         </button>
       </header>
       <aside
-        className={`${open ? "block" : "hidden"} border-r border-line bg-surface md:sticky md:top-0 md:block md:h-screen md:w-60 md:shrink-0`}
+        className={`${open ? "block" : "hidden"} border-r border-line bg-surface md:sticky md:top-0 md:block md:h-screen md:w-60 md:shrink-0 print:hidden`}
       >
         <div className="flex h-full flex-col gap-6 overflow-y-auto p-4">
           <div className="hidden items-center gap-2 md:flex">
@@ -54,6 +54,7 @@ export function Layout() {
           <nav className="space-y-0.5">
             <NavItem to="/" onClick={close}>Übersicht</NavItem>
             <NavItem to="/logs" onClick={close}>Logs</NavItem>
+            {(firewalls.data?.length ?? 0) > 1 && <NavItem to="/compare" onClick={close}>Vergleichen</NavItem>}
           </nav>
           <div>
             <div className="mb-1 px-3 text-xs font-medium uppercase tracking-wide text-muted">Firewalls</div>
@@ -88,7 +89,7 @@ export function Layout() {
           </div>
         </div>
       </aside>
-      <main className="min-w-0 flex-1 p-4 md:p-6">
+      <main className="min-w-0 flex-1 p-4 md:p-6 print:p-0">
         <Outlet />
       </main>
     </div>

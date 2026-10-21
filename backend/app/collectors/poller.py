@@ -137,6 +137,7 @@ async def poll_config(fw_id: int) -> None:
         existing_rows = (await db.execute(select(ConfigObject).where(ConfigObject.firewall_id == fw.id))).scalars()
         existing: dict[tuple[str, str], ConfigObject] = {(o.entity_type, o.name): o for o in existing_rows}
         first_snapshot = not existing
+        prev_poll = fw.last_config_at
         errors, no_permission = [], []
 
         for res in results:
@@ -172,7 +173,13 @@ async def poll_config(fw_id: int) -> None:
                     if not first_snapshot:
                         db.add(
                             ConfigChange(
-                                firewall_id=fw.id, entity_type=res.entity, name=name, action="added", new=item, time=now
+                                firewall_id=fw.id,
+                                entity_type=res.entity,
+                                name=name,
+                                action="added",
+                                new=item,
+                                time=now,
+                                window_start=prev_poll,
                             )
                         )
                     continue
@@ -186,6 +193,7 @@ async def poll_config(fw_id: int) -> None:
                             old=obj.data,
                             new=item,
                             time=now,
+                            window_start=prev_poll,
                         )
                     )
                     obj.data, obj.hash, obj.updated_at = item, digest, now
@@ -195,7 +203,13 @@ async def poll_config(fw_id: int) -> None:
             for o in removed:
                 db.add(
                     ConfigChange(
-                        firewall_id=fw.id, entity_type=res.entity, name=o.name, action="removed", old=o.data, time=now
+                        firewall_id=fw.id,
+                        entity_type=res.entity,
+                        name=o.name,
+                        action="removed",
+                        old=o.data,
+                        time=now,
+                        window_start=prev_poll,
                     )
                 )
                 await db.delete(o)
