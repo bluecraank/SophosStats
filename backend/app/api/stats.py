@@ -1,7 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import and_, func, literal_column, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import distinct_on
 
@@ -9,7 +10,10 @@ from app.api.firewalls import get_firewall
 from app.models import ConfigObject, Firewall, InterfaceMetric, LogEntry, Metric, RuleUsageHourly
 from app.schemas import FirewallOut
 from app.security import DB, CurrentUser
+from app.services.log_filters import LogFilter, to_condition
 from app.services.rules import rule_groups, summarize_rule
+
+_FILTER_LIST = TypeAdapter(list[LogFilter])
 
 router = APIRouter(prefix="/api", tags=["stats"])
 
@@ -352,6 +356,7 @@ async def logs(
     src_ip: str | None = None,
     dst_ip: str | None = None,
     q: Annotated[str | None, Query(max_length=200)] = None,
+    filters: Annotated[str | None, Query(max_length=4000, description="JSON-Liste [{field, op, value}]")] = None,
     start: datetime | None = None,
     end: datetime | None = None,
     before_time: datetime | None = None,
@@ -382,6 +387,13 @@ async def logs(
                 LogEntry.dst_ip.ilike(pattern, escape="\\"),
             )
         )
+    if filters:
+        try:
+            parsed = _FILTER_LIST.validate_json(filters)
+            conditions.extend(to_condition(f) for f in parsed[:20])
+        except (ValidationError, ValueError) as exc:
+            detail = exc.errors()[0]["msg"] if isinstance(exc, ValidationError) else str(exc)
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Filter ungültig: {detail}") from exc
     # Ohne Zeitfilter auf die letzten 24h begrenzen, damit die Abfrage nicht alle Chunks scannt
     conditions.append(LogEntry.time >= (start or _since(24)))
     if end:
