@@ -25,30 +25,6 @@ UnusedDays = Annotated[int, Query(ge=1, le=365)]
 # --- Regel-Audit ---------------------------------------------------------------
 
 
-async def _rule_profiles(db: DB, fw_id: int, rule_ids: list[int], since: datetime) -> dict[int, dict]:
-    """Wie viele verschiedene Quellen/Ziele/Ports eine Regel tatsächlich nutzt."""
-    if not rule_ids:
-        return {}
-    rows = (
-        await db.execute(
-            select(
-                LogEntry.rule_id,
-                func.count(func.distinct(LogEntry.src_ip)).label("sources"),
-                func.count(func.distinct(LogEntry.dst_ip)).label("destinations"),
-                func.count(func.distinct(LogEntry.dst_port)).label("ports"),
-            )
-            .where(
-                LogEntry.firewall_id == fw_id,
-                LogEntry.log_type == "Firewall",
-                LogEntry.rule_id.in_(rule_ids),
-                LogEntry.time > since,
-            )
-            .group_by(LogEntry.rule_id)
-        )
-    ).all()
-    return {r.rule_id: {"sources": r.sources, "destinations": r.destinations, "ports": r.ports} for r in rows}
-
-
 def _ack_dict(a: FindingAck) -> dict:
     return {
         "id": a.id,
@@ -95,11 +71,8 @@ async def _audit(db: DB, fw_id: int, unused_days: int) -> dict:
     rules = overview["rules"]
     findings = audit_rules(rules, now, overview["data_since"], unused_days)
 
-    broad_ids = [f["rule_id"] for f in findings if f["kind"] == "too_broad" and f["rule_id"] is not None]
-    profiles = await _rule_profiles(db, fw_id, broad_ids, since)
-    for f in findings:
-        if f["kind"] == "too_broad" and f["rule_id"] in profiles:
-            f["profile"] = profiles[f["rule_id"]]
+    # Nutzungsprofile (Quellen/Ziele/Ports) bewusst nicht hier: das wäre ein Scan über 30 Tage Roh-Logs für
+    # jede breite Regel. Pro Regel abrufbar über /rules/{id}/profile.
     await _apply_acks(db, fw_id, findings, now)
     open_findings = [f for f in findings if "ack" not in f]
     return {

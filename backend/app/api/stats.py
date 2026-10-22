@@ -1,3 +1,5 @@
+import ipaddress
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
@@ -7,7 +9,7 @@ from sqlalchemy import and_, func, literal_column, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import distinct_on
 
 from app.api.firewalls import get_firewall
-from app.models import ConfigObject, Firewall, InterfaceMetric, LogEntry, Metric, RuleUsageHourly
+from app.models import ConfigObject, Firewall, InterfaceMetric, LogEntry, Metric, RuleLastSeen, RuleUsageHourly
 from app.schemas import FirewallOut
 from app.security import DB, CurrentUser
 from app.services.log_filters import LogFilter, to_condition
@@ -206,12 +208,12 @@ async def rules_overview(db: DB, fw_id: int, start: datetime, end: datetime | No
     ).all()
     ever = (
         await db.execute(
-            select(RuleUsageHourly.rule_id, func.max(RuleUsageHourly.rule_name), func.max(RuleUsageHourly.last_seen))
-            .where(RuleUsageHourly.firewall_id == fw_id)
-            .group_by(RuleUsageHourly.rule_id)
+            select(RuleLastSeen.rule_id, RuleLastSeen.rule_name, RuleLastSeen.last_seen).where(
+                RuleLastSeen.firewall_id == fw_id
+            )
         )
     ).all()
-    data_since = await db.scalar(select(func.min(RuleUsageHourly.time)).where(RuleUsageHourly.firewall_id == fw_id))
+    data_since = await db.scalar(select(func.min(RuleLastSeen.first_seen)).where(RuleLastSeen.firewall_id == fw_id))
 
     id_by_name = {name: rid for rid, name, _ in ever if name}
     last_seen_ever = {rid: ts for rid, _, ts in ever}
@@ -345,6 +347,28 @@ def _escape_like(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _fulltext(q: str):
+    """Volltextsuche, die vorhandene Indizes nutzt: IP -> exakt auf Quelle/Ziel, Zahl -> Port/Regel-ID,
+    nur echter Text läuft über ILIKE (teuer, da ohne Index)."""
+    try:
+        ip = str(ipaddress.ip_address(q))
+        return or_(LogEntry.src_ip == ip, LogEntry.dst_ip == ip)
+    except ValueError:
+        pass
+    if q.isdigit() and int(q) < 65536:
+        n = int(q)
+        return or_(LogEntry.dst_port == n, LogEntry.src_port == n, LogEntry.rule_id == n)
+    pattern = f"%{_escape_like(q)}%"
+    prefix = f"{_escape_like(q)}%"
+    return or_(
+        LogEntry.message.ilike(pattern, escape="\\"),
+        LogEntry.user_name.ilike(pattern, escape="\\"),
+        LogEntry.rule_name.ilike(pattern, escape="\\"),
+        LogEntry.src_ip.like(prefix, escape="\\"),
+        LogEntry.dst_ip.like(prefix, escape="\\"),
+    )
+
+
 @router.get("/logs")
 async def logs(
     db: DB,
@@ -377,16 +401,7 @@ async def logs(
     if dst_ip:
         conditions.append(LogEntry.dst_ip == dst_ip)
     if q:
-        pattern = f"%{_escape_like(q)}%"
-        conditions.append(
-            or_(
-                LogEntry.message.ilike(pattern, escape="\\"),
-                LogEntry.user_name.ilike(pattern, escape="\\"),
-                LogEntry.rule_name.ilike(pattern, escape="\\"),
-                LogEntry.src_ip.ilike(pattern, escape="\\"),
-                LogEntry.dst_ip.ilike(pattern, escape="\\"),
-            )
-        )
+        conditions.append(_fulltext(q.strip()))
     if filters:
         try:
             parsed = _FILTER_LIST.validate_json(filters)
@@ -442,20 +457,30 @@ async def logs(
     return {"items": items, "next": cursor}
 
 
+# Log-Typen ändern sich selten – kurz zwischenspeichern statt bei jedem Öffnen die Logs zu gruppieren
+_FACET_CACHE: dict[int | None, tuple[float, dict]] = {}
+_FACET_TTL = 300
+
+
 @router.get("/logs/facets")
 async def log_facets(db: DB, _user: CurrentUser, firewall_id: int | None = None) -> dict:
+    cached = _FACET_CACHE.get(firewall_id)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
     stmt = (
-        select(LogEntry.log_type, LogEntry.log_subtype, func.count().label("n"))
-        .where(LogEntry.time > _since(24 * 7))
+        select(LogEntry.log_type, LogEntry.log_subtype)
+        .where(LogEntry.time > _since(24))
         .group_by(LogEntry.log_type, LogEntry.log_subtype)
         .order_by(LogEntry.log_type, LogEntry.log_subtype)
     )
     if firewall_id is not None:
         stmt = stmt.where(LogEntry.firewall_id == firewall_id)
     facets: dict[str, list[str]] = {}
-    for log_type, subtype, _n in (await db.execute(stmt)).all():
+    for log_type, subtype in (await db.execute(stmt)).all():
         if log_type:
             facets.setdefault(log_type, [])
             if subtype:
                 facets[log_type].append(subtype)
-    return {"log_types": facets}
+    result = {"log_types": facets}
+    _FACET_CACHE[firewall_id] = (time.monotonic() + _FACET_TTL, result)
+    return result

@@ -178,12 +178,6 @@ export function FindingRow({ f, onAck, onRevoke }: { f: AuditFinding; onAck?: ()
           {f.rule}
         </span>
         <span className="block text-sm text-muted-foreground">{f.message}</span>
-        {f.profile && (
-          <span className="block text-xs text-muted-foreground/80">
-            Tatsächlich genutzt: {f.profile.sources} Quellen · {f.profile.destinations} Ziele · {f.profile.ports} Zielports
-            – Details im Tab „Regeln“
-          </span>
-        )}
         {f.ack && (
           <span className="mt-1 block rounded-md border border-good/25 bg-good/5 px-3 py-2 text-xs">
             <span className="text-foreground">„{f.ack.reason}“</span>
@@ -223,6 +217,7 @@ export function AuditTab({ fwId }: { fwId: number }) {
   const q = useQuery({
     queryKey: ["audit", fwId, days],
     queryFn: () => api<AuditResult>(`/api/firewalls/${fwId}/audit`, { params: { unused_days: days } }),
+    staleTime: 5 * 60_000,
   });
   const revoke = useMutation({
     mutationFn: (ackId: number) => api(`/api/firewalls/${fwId}/audit/acks/${ackId}`, { method: "DELETE" }),

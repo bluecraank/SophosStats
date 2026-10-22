@@ -207,6 +207,19 @@ class LogEntry(Base):
     fields: Mapped[dict] = mapped_column(JSONB)
 
 
+class RuleLastSeen(Base):
+    """Eine Zeile pro Regel: erstmals/zuletzt in den Logs gesehen. Erspart das Gruppieren der gesamten
+    stündlichen Nutzungshistorie für "zuletzt genutzt" und "ungenutzt"."""
+
+    __tablename__ = "rule_last_seen"
+
+    firewall_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rule_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rule_name: Mapped[str | None] = mapped_column(String(255))
+    first_seen: Mapped[datetime] = _ts()
+    last_seen: Mapped[datetime] = _ts()
+
+
 class RuleUsageHourly(Base):
     """Pro Stunde aggregierte Regelnutzung, aus den Firewall-Logs berechnet."""
 

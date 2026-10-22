@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import delete, select
 
 from app.collectors import poller
-from app.models import Firewall, InterfaceMetric, LogEntry, Metric, RuleUsageHourly
+from app.models import Firewall, InterfaceMetric, LogEntry, Metric, RuleLastSeen, RuleUsageHourly
 from app.schemas import FirewallCreate, FirewallOut, FirewallUpdate, TestResult
 from app.security import DB, AdminUser, CurrentUser, encrypt
 
@@ -73,7 +73,7 @@ async def update_firewall(fw_id: int, body: FirewallUpdate, db: DB, _admin: Admi
 async def delete_firewall(fw_id: int, db: DB, _admin: AdminUser) -> None:
     fw = await get_firewall(db, fw_id)
     # Zeitreihen-Tabellen haben keinen Fremdschlüssel (Hypertables) und werden explizit geleert
-    for model in (Metric, InterfaceMetric, LogEntry, RuleUsageHourly):
+    for model in (Metric, InterfaceMetric, LogEntry, RuleUsageHourly, RuleLastSeen):
         await db.execute(delete(model).where(model.firewall_id == fw.id))
     await db.delete(fw)
     await db.commit()

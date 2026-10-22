@@ -150,7 +150,6 @@ export interface AuditFinding {
   message: string;
   covered_by?: string;
   last_seen?: string;
-  profile?: { sources: number; destinations: number; ports: number };
   open_dimensions?: string[];
   ack?: FindingAck;
   ack_stale?: FindingAck & { why: string };

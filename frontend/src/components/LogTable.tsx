@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { ChevronRight, Equal, EqualNot, Loader2, Route, Search, X } from "lucide-react";
+import { ChevronRight, Equal, EqualNot, Loader2, Radio, RefreshCw, Route, Search, X } from "lucide-react";
 import { Fragment, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Button } from "@/components/ui/button";
@@ -141,7 +141,9 @@ export function LogTable({ fixed = {}, firewalls }: { fixed?: LogFilter; firewal
   const facets = useQuery({
     queryKey: ["log-facets", firewallId],
     queryFn: () => api<{ log_types: Record<string, string[]> }>("/api/logs/facets", { params: { firewall_id: firewallId } }),
+    staleTime: 5 * 60_000,
   });
+  const [live, setLive] = useState(false);
 
   const filterJson = filters.length ? JSON.stringify(filters) : undefined;
   const logs = useInfiniteQuery({
@@ -161,7 +163,8 @@ export function LogTable({ fixed = {}, firewalls }: { fixed?: LogFilter; firewal
       }),
     initialPageParam: {} as Record<string, string | number>,
     getNextPageParam: (last) => last.next ?? undefined,
-    refetchInterval: 30_000,
+    // Live-Modus lädt nur nach, solange nur die erste Seite geladen ist – sonst würden alle Seiten neu abgefragt
+    refetchInterval: (query) => (live && (query.state.data?.pages.length ?? 0) <= 1 ? 15_000 : false),
   });
 
   const items = logs.data?.pages.flatMap((p) => p.items) ?? [];
@@ -211,6 +214,19 @@ export function LogTable({ fixed = {}, firewalls }: { fixed?: LogFilter; firewal
           </SelectContent>
         </Select>
         <AddFilter rawFields={rawFields} onAdd={addFilter} />
+        <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => logs.refetch()} disabled={logs.isFetching} title="Neu laden">
+          <RefreshCw className={cn(logs.isFetching && "animate-spin")} />
+        </Button>
+        <Button
+          type="button"
+          variant={live ? "default" : "outline"}
+          size="sm"
+          className="h-9"
+          onClick={() => setLive(!live)}
+          title="Neue Einträge alle 15 Sekunden laden (nur erste Seite)"
+        >
+          <Radio className={cn(live && "animate-pulse")} /> Live
+        </Button>
       </form>
 
       {(filters.length > 0 || search) && (

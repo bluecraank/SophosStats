@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.collectors import sfos_log
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import Firewall, LogEntry, RuleUsageHourly
+from app.models import Firewall, LogEntry, RuleLastSeen, RuleUsageHourly
 
 log = logging.getLogger(__name__)
 
@@ -228,6 +228,28 @@ class SyslogServer:
                     },
                 )
                 await db.execute(stmt)
+
+                seen: dict[tuple[int, int], dict] = {}
+                for (fw, rid, bucket), agg in usage.items():
+                    cur = seen.setdefault(
+                        (fw, rid), {"first_seen": bucket, "last_seen": agg["last_seen"], "rule_name": None}
+                    )
+                    cur["first_seen"] = min(cur["first_seen"], bucket)
+                    cur["last_seen"] = max(cur["last_seen"], agg["last_seen"])
+                    cur["rule_name"] = agg.get("rule_name") or cur["rule_name"]
+                ls = pg_insert(RuleLastSeen).values(
+                    [{"firewall_id": fw, "rule_id": rid, **v} for (fw, rid), v in seen.items()]
+                )
+                c = RuleLastSeen.__table__.c
+                await db.execute(
+                    ls.on_conflict_do_update(
+                        index_elements=["firewall_id", "rule_id"],
+                        set_={
+                            "last_seen": func.greatest(c.last_seen, ls.excluded.last_seen),
+                            "rule_name": func.coalesce(ls.excluded.rule_name, c.rule_name),
+                        },
+                    )
+                )
             for fw_id, ts in last_seen.items():
                 await db.execute(
                     update(Firewall)

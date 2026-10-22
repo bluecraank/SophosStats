@@ -23,7 +23,8 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 15_000,
-      refetchOnWindowFocus: true,
+      // Kein Neuladen bei jedem Fensterwechsel – Seiten mit Live-Daten haben eigene Intervalle
+      refetchOnWindowFocus: false,
       // 401/403/404 nicht wiederholen
       retry: (count, err) => !(err instanceof ApiError && err.status < 500) && count < 2,
     },

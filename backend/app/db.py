@@ -39,6 +39,12 @@ _ADDED_COLUMNS = [
     "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS site_networks TEXT",
     # Korrelation von Verbindungen über mehrere Firewalls (Quelle/Ziel im Zeitfenster)
     "CREATE INDEX IF NOT EXISTS ix_log_flow ON log_entries (src_ip, dst_ip, time)",
+    "CREATE INDEX IF NOT EXISTS ix_log_dst ON log_entries (dst_ip, time)",
+    # rule_last_seen einmalig aus der stündlichen Nutzung befüllen; der One-Time-Filter überspringt die
+    # Aggregation komplett, sobald die Tabelle Daten enthält
+    "INSERT INTO rule_last_seen (firewall_id, rule_id, rule_name, first_seen, last_seen) "
+    "SELECT firewall_id, rule_id, max(rule_name), min(time), max(last_seen) FROM rule_usage_hourly "
+    "WHERE NOT EXISTS (SELECT 1 FROM rule_last_seen) GROUP BY firewall_id, rule_id",
 ]
 
 
