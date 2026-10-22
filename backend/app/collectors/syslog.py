@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.collectors import sfos_log
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import Firewall, LogEntry, RuleLastSeen, RuleUsageHourly
+from app.models import AdminEvent, Firewall, LogEntry, RuleLastSeen, RuleUsageHourly
 
 log = logging.getLogger(__name__)
 
@@ -146,6 +146,7 @@ class SyslogServer:
     async def _write(self, batch: list[RawMessage]) -> None:
         await self._refresh_source_map()
         rows: list[dict] = []
+        admin_rows: list[dict] = []
         usage: dict[tuple[int, int, datetime], dict] = defaultdict(
             lambda: {"hits": 0, "denied": 0, "sent_bytes": 0, "recv_bytes": 0, "sent_pkts": 0, "recv_pkts": 0}
         )
@@ -187,6 +188,18 @@ class SyslogServer:
                 }
             )
 
+            if parsed.is_admin:
+                admin_rows.append(
+                    {
+                        "time": parsed.time,
+                        "firewall_id": fw_id,
+                        "user_name": parsed.get("user_name", "user"),
+                        "src_ip": parsed.get("src_ip"),
+                        "component": parsed.get("log_component"),
+                        "message": parsed.get("message"),
+                    }
+                )
+
             if parsed.log_type == "Firewall" and parsed.rule_id is not None:
                 bucket = parsed.time.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
                 agg = usage[(fw_id, parsed.rule_id, bucket)]
@@ -206,6 +219,8 @@ class SyslogServer:
             return
         async with SessionLocal() as db, db.begin():
             await db.execute(insert(LogEntry), rows)
+            if admin_rows:
+                await db.execute(insert(AdminEvent), admin_rows)
             if usage:
                 values = [
                     {"firewall_id": fw, "rule_id": rid, "time": bucket, **agg}

@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, or_, select
 
 from app.api.firewalls import get_firewall
 from app.api.stats import Hours, _since, rules_overview
-from app.models import ConfigChange, ConfigObject, FindingAck, Firewall, LogEntry, Metric
+from app.models import AdminEvent, ConfigChange, ConfigObject, FindingAck, Firewall, LogEntry, Metric
 from app.schemas import FirewallOut
 from app.security import DB, AdminUser, CurrentUser
 from app.services.audit import audit_rules
@@ -207,20 +207,10 @@ async def rule_profile(fw_id: int, rule_id: int, db: DB, _user: CurrentUser, hou
 # --- Änderungen: wer, wann, Stand am Datum ------------------------------------
 
 
-_ADMIN_COMPONENTS = ["GUI", "CLI", "API", "Console", "SSH", "Admin", "Central"]
 _CHANGE_WORDS = ("add", "modif", "delet", "chang", "updat", "creat", "remov", "edit", "appl")
 _BY = re.compile(r"\bby\s+'?([^'\s]+)'?", re.IGNORECASE)
 _FROM = re.compile(r"\bfrom\s+'?([0-9a-fA-F:.]+)'?", re.IGNORECASE)
 _USING = re.compile(r"\busing\s+'?([^'\s]+)'?", re.IGNORECASE)
-
-
-def _is_admin_log():
-    """Admin-Events: je nach Firmware als Typ/Untertyp "Admin" oder als Event der Komponente GUI/CLI/API."""
-    return or_(
-        LogEntry.log_subtype.ilike("%admin%"),
-        LogEntry.log_type.ilike("%admin%"),
-        LogEntry.log_component.in_(_ADMIN_COMPONENTS),
-    )
 
 
 def _actor(log, exact: bool) -> dict:
@@ -254,15 +244,20 @@ async def change_actors(db: DB, fw: Firewall, changes: list[ConfigChange]) -> di
     }
     logs = (
         await db.execute(
-            select(LogEntry.time, LogEntry.user_name, LogEntry.src_ip, LogEntry.log_component, LogEntry.message)
-            .where(
-                LogEntry.firewall_id == fw.id,
-                LogEntry.time >= min(starts.values()),
-                LogEntry.time <= max(c.time for c in changes),
-                LogEntry.message.is_not(None),
-                _is_admin_log(),
+            select(
+                AdminEvent.time,
+                AdminEvent.user_name,
+                AdminEvent.src_ip,
+                AdminEvent.component.label("log_component"),
+                AdminEvent.message,
             )
-            .order_by(LogEntry.time)
+            .where(
+                AdminEvent.firewall_id == fw.id,
+                AdminEvent.time >= min(starts.values()),
+                AdminEvent.time <= max(c.time for c in changes),
+                AdminEvent.message.is_not(None),
+            )
+            .order_by(AdminEvent.time)
             .limit(20_000)
         )
     ).all()
@@ -286,8 +281,8 @@ async def admin_events_status(fw_id: int, db: DB, _user: CurrentUser) -> dict:
     await get_firewall(db, fw_id)
     row = (
         await db.execute(
-            select(func.count(), func.max(LogEntry.time)).where(
-                LogEntry.firewall_id == fw_id, LogEntry.time > datetime.now(UTC) - timedelta(days=7), _is_admin_log()
+            select(func.count(), func.max(AdminEvent.time)).where(
+                AdminEvent.firewall_id == fw_id, AdminEvent.time > datetime.now(UTC) - timedelta(days=7)
             )
         )
     ).one()
@@ -486,9 +481,7 @@ async def report(
     ).all()
 
     admin_events = await db.scalar(
-        select(func.count()).where(
-            LogEntry.firewall_id == fw_id, LogEntry.time >= start, LogEntry.time < end, _is_admin_log()
-        )
+        select(func.count()).where(AdminEvent.firewall_id == fw_id, AdminEvent.time >= start, AdminEvent.time < end)
     )
 
     return {

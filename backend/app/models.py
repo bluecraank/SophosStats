@@ -207,6 +207,22 @@ class LogEntry(Base):
     fields: Mapped[dict] = mapped_column(JSONB)
 
 
+class AdminEvent(Base):
+    """Admin-Aktionen aus dem Syslog, getrennt von den Roh-Logs gespeichert: "wer hat geändert" durchsucht
+    dann wenige Einträge statt Millionen Logzeilen ohne passenden Index."""
+
+    __tablename__ = "admin_events"
+    __table_args__ = (Index("ix_admin_fw_time", "firewall_id", "time"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    time: Mapped[datetime] = _ts(primary_key=True)
+    firewall_id: Mapped[int] = mapped_column(Integer)
+    user_name: Mapped[str | None] = mapped_column(String(255))
+    src_ip: Mapped[str | None] = mapped_column(String(64))
+    component: Mapped[str | None] = mapped_column(String(64))
+    message: Mapped[str | None] = mapped_column(Text)
+
+
 class RuleLastSeen(Base):
     """Eine Zeile pro Regel: erstmals/zuletzt in den Logs gesehen. Erspart das Gruppieren der gesamten
     stündlichen Nutzungshistorie für "zuletzt genutzt" und "ungenutzt"."""

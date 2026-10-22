@@ -28,25 +28,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     retry: false,
   });
 
+  // Beim Abmelden nur die Daten verwerfen, nicht den "me"-Eintrag: qc.clear() würde ihn entfernen, der
+  // Beobachter dieser Komponente hinge dann an einem verwaisten Eintrag und bekäme den nächsten Login nicht mit.
+  const signedOut = () => {
+    qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
+    qc.setQueryData(["me"], null);
+  };
+
   useEffect(() => {
-    const onExpired = () => {
-      qc.clear();
-      qc.setQueryData(["me"], null);
-    };
-    window.addEventListener("auth:expired", onExpired);
-    return () => window.removeEventListener("auth:expired", onExpired);
+    window.addEventListener("auth:expired", signedOut);
+    return () => window.removeEventListener("auth:expired", signedOut);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qc]);
 
   const value: AuthState = {
     user: me.data ?? null,
     loading: me.isPending,
-    setUser: (u) => qc.setQueryData(["me"], u),
+    setUser: (u) => {
+      if (u) qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
+      qc.setQueryData(["me"], u);
+    },
     logout: async () => {
       try {
         await api("/api/auth/logout", { method: "POST" });
       } finally {
-        qc.clear();
-        qc.setQueryData(["me"], null);
+        signedOut();
       }
     },
   };

@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _KV = re.compile(r'([A-Za-z_][\w.-]*)=("(?:[^"\\]|\\.)*"|\S*)')
 _PRI = re.compile(r"^<(\d{1,3})>")
+ADMIN_COMPONENTS = ("GUI", "CLI", "API", "Console", "SSH", "Admin", "Central")
 
 
 @dataclass
@@ -70,6 +71,14 @@ class ParsedLog:
     def con_event(self) -> str | None:
         v = self.get("con_event")
         return v.lower() if v else None
+
+    @property
+    def is_admin(self) -> bool:
+        """Admin-Aktion (Anmeldung, Konfigurationsänderung …): je nach Firmware als Typ/Untertyp "Admin"
+        oder als Event der Komponente GUI/CLI/API."""
+        subtype = (self.get("log_subtype") or "").lower()
+        log_type = (self.get("log_type") or "").lower()
+        return "admin" in subtype or "admin" in log_type or (self.get("log_component") or "") in ADMIN_COMPONENTS
 
     @property
     def is_denied(self) -> bool:

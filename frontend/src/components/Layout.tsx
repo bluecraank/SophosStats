@@ -159,6 +159,7 @@ function CommandMenu({ firewalls, isAdmin }: { firewalls: Firewall[]; isAdmin: b
 export function Layout() {
   const { user, loading, logout } = useAuth();
   const { theme, setTheme } = useTheme();
+  const location = useLocation();
   const firewalls = useQuery({
     queryKey: ["firewalls"],
     queryFn: () => api<Firewall[]>("/api/firewalls"),
@@ -167,7 +168,7 @@ export function Layout() {
   });
 
   if (loading) return null;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   const fws = firewalls.data ?? [];
   const isAdmin = user.role === "admin";
 

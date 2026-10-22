@@ -1,6 +1,6 @@
 import { KeyRound, Loader2, Shield } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { Navigate } from "react-router";
+import { Navigate, useLocation, useNavigate } from "react-router";
 import { ErrorBox } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,9 @@ import type { User } from "@/lib/types";
 
 export function LoginPage() {
   const { user, setUser } = useAuth();
+  const navigate = useNavigate();
+  // Nach dem Login dorthin zurück, wo die Sitzung abgelaufen ist
+  const from = (useLocation().state as { from?: string } | null)?.from ?? "/";
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [totp, setTotp] = useState("");
@@ -19,7 +22,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (user) return <Navigate to="/" replace />;
+  if (user) return <Navigate to={from} replace />;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -31,6 +34,7 @@ export function LoginPage() {
         body: { username, password, totp_code: needTotp ? totp : null },
       });
       setUser(u);
+      navigate(from, { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.message === "totp_required") {
         setNeedTotp(true);

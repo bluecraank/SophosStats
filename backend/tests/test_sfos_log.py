@@ -54,3 +54,9 @@ def test_escaped_quotes_and_bsd_header():
 
 def test_garbage_returns_none():
     assert sfos_log.parse("hello world") is None
+
+
+def test_admin_event_detection():
+    assert sfos_log.parse('log_type="Event" log_component="GUI" log_subtype="Admin" message="x"').is_admin
+    assert sfos_log.parse('log_type="Event" log_component="API" log_subtype="System"').is_admin
+    assert not sfos_log.parse('log_type="Firewall" log_component="Firewall Rule" log_subtype="Allowed"').is_admin

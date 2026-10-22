@@ -28,6 +28,7 @@ _HYPERTABLES = [
     ("metrics", "retention_metrics_days", "firewall_id, name"),
     ("interface_metrics", "retention_metrics_days", "firewall_id, interface"),
     ("log_entries", "retention_logs_days", "firewall_id"),
+    ("admin_events", "retention_logs_days", "firewall_id"),
     ("rule_usage_hourly", "retention_rule_usage_days", "firewall_id"),
 ]
 
@@ -45,6 +46,12 @@ _ADDED_COLUMNS = [
     "INSERT INTO rule_last_seen (firewall_id, rule_id, rule_name, first_seen, last_seen) "
     "SELECT firewall_id, rule_id, max(rule_name), min(time), max(last_seen) FROM rule_usage_hourly "
     "WHERE NOT EXISTS (SELECT 1 FROM rule_last_seen) GROUP BY firewall_id, rule_id",
+    # admin_events einmalig aus den vorhandenen Logs befüllen (gleiche Regel wie sfos_log.ParsedLog.is_admin)
+    "INSERT INTO admin_events (time, firewall_id, user_name, src_ip, component, message) "
+    "SELECT time, firewall_id, user_name, src_ip, log_component, message FROM log_entries "
+    "WHERE NOT EXISTS (SELECT 1 FROM admin_events) AND firewall_id IS NOT NULL AND ("
+    "log_subtype ILIKE '%admin%' OR log_type ILIKE '%admin%' "
+    "OR log_component IN ('GUI', 'CLI', 'API', 'Console', 'SSH', 'Admin', 'Central'))",
 ]
 
 
@@ -76,7 +83,13 @@ async def init_schema() -> None:
             return
         for table, retention_attr, segment_by in _HYPERTABLES:
             days = getattr(settings, retention_attr)
-            await conn.execute(text(f"SELECT create_hypertable('{table}', by_range('time'), if_not_exists => TRUE)"))
+            # migrate_data: neu hinzugekommene Tabellen können beim ersten Start schon befüllt sein (Erstbefüllung)
+            await conn.execute(
+                text(
+                    f"SELECT create_hypertable('{table}', by_range('time'), "
+                    "if_not_exists => TRUE, migrate_data => TRUE)"
+                )
+            )
             await conn.execute(text(f"SELECT remove_retention_policy('{table}', if_exists => TRUE)"))
             await conn.execute(
                 text(f"SELECT add_retention_policy('{table}', INTERVAL '{int(days)} days', if_not_exists => TRUE)")
