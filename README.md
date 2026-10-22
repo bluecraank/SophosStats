@@ -66,6 +66,12 @@ blockierter Verbindungen über mehrere Standorte.
 - Alle Logs per Syslog, mit Volltextsuche und **kombinierbaren Filtern**: Subnetz (CIDR), Ports, beliebige Rohfelder
 - Klick auf einen Wert filtert danach, Strg+Klick schließt ihn aus. Die Suche steht in der URL und lässt sich teilen.
 
+**Fehlersuche**
+- Quelle, Ziel (IP oder Website) und Dienst eingeben: SophosStats ermittelt Standort und Zone von Quelle und Ziel,
+  die Firewalls auf dem Weg und **simuliert deren Regelwerke** – erste passende Regel, sonst Default Drop
+- Zeigt je Firewall die greifende Regel mit Haken pro Kriterium und **Beinahe-Treffer** („Regel #20 passt bis auf
+  den Dienst“), dazu den Abgleich mit den Logs der letzten 24 h
+
 **Standortübergreifend**
 - Verfolgt eine Verbindung über mehrere Firewalls, z. B. Standort A → WireGuard → Standort B, und zeigt: *„Auf FW-A erlaubt, auf FW-B blockiert → Regel fehlt auf FW-B“*
 - Übersicht aller blockierten Verbindungen zwischen Standorten mit Handlungsbedarf
@@ -84,6 +90,7 @@ blockierter Verbindungen über mehrere Standorte.
 | **Audit**: Befunde mit Akzeptanz<br>![Audit](docs/screenshots/audit.png) | **Zonen-Matrix**: Regeln je Zonenpaar<br>![Zonen-Matrix](docs/screenshots/zone-matrix.png) |
 | **Beziehungen**: alle Regeln zu einem Objekt<br>![Fokus-Graph](docs/screenshots/graph-focus.png) | **Änderungen**: Diff mit Verursacher<br>![Änderungen](docs/screenshots/changes.png) |
 | **Logs**: Filter per Klick und CIDR<br>![Logs](docs/screenshots/logs.png) | **Standortübergreifend**: wo fehlt die Regel?<br>![Standortübergreifend](docs/screenshots/cross-site.png) |
+| **Fehlersuche**: Regelwerke über alle Firewalls simulieren<br>![Fehlersuche](docs/screenshots/troubleshoot.png) | |
 
 *Die Screenshots zeigen Beispieldaten.*
 
@@ -216,6 +223,10 @@ Die internen Netze jedes Standorts werden automatisch aus den Interfaces, VLANs 
 Netze, etwa hinter einem weiteren Router, ergänzt du unter *Firewalls verwalten → Zusätzliche Standort-Netze*.
 Interface- und Zonennamen müssen auf den Firewalls **nicht** gleich sein, die Zuordnung läuft nur über die IPs.
 
+Für die **Fehlersuche** muss SophosStats zusätzlich die Zone kennen, über die eine Firewall die anderen Standorte
+erreicht (z. B. `WG_S2S`). Sie wird automatisch erkannt (Zonentyp VPN oder Namen mit WG/S2S/VPN/Tunnel). Klappt das
+nicht, trägst du sie unter *Firewalls verwalten → Zone zu anderen Standorten* ein.
+
 ---
 
 ## Sicherheit
@@ -316,5 +327,8 @@ docs/screenshots/ Bilder für diese README
 - **Log-Format:** Der Parser erwartet das *Device standard format*. Die Feldnamen stammen aus der SFOS-Dokumentation, nicht jede Firmware-Version ist geprüft.
 - **Verdeckte/redundante Regeln** werden über Objektnamen verglichen. Gruppeninhalte und überlappende IP-Bereiche werden nicht aufgelöst, deshalb werden nur eindeutige Fälle gemeldet.
 - **Standortübergreifend** setzt voraus, dass zwischen den Standorten nicht genattet wird.
+- **Fehlersuche** simuliert nur die Firewall-Regeln. NAT, Web-Filter, IPS und Anwendungskontrolle werden nicht
+  geprüft. Benutzerregeln, Zeitpläne und nicht abgerufene Objekte werden als „unsicher“ markiert statt geraten.
+  Websites werden mit dem DNS des SophosStats-Servers aufgelöst.
 - **Konfigurationshistorie** beginnt mit dem ersten Abruf.
 - **Datenbank-Migrationen** werden beim Start automatisch ergänzt. Für größere Schemaänderungen ist Alembic vorgesehen.

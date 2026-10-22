@@ -38,6 +38,7 @@ _ADDED_COLUMNS = [
     "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS last_config_warning TEXT",
     "ALTER TABLE config_changes ADD COLUMN IF NOT EXISTS window_start TIMESTAMPTZ",
     "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS site_networks TEXT",
+    "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS site_link_zone VARCHAR(100)",
     # Korrelation von Verbindungen über mehrere Firewalls (Quelle/Ziel im Zeitfenster)
     "CREATE INDEX IF NOT EXISTS ix_log_flow ON log_entries (src_ip, dst_ip, time)",
     "CREATE INDEX IF NOT EXISTS ix_log_dst ON log_entries (dst_ip, time)",

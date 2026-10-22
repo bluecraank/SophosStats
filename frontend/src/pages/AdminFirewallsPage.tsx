@@ -31,6 +31,7 @@ const DEFAULTS: FormState = {
   snmp_priv_key: "",
   syslog_source_ip: "",
   site_networks: "",
+  site_link_zone: "",
   metrics_interval_s: 60,
   config_interval_s: 900,
 };
@@ -54,7 +55,7 @@ function FirewallForm({ initial, onDone }: { initial: Firewall | null; onDone: (
   const save = useMutation({
     mutationFn: () => {
       const body: Record<string, unknown> = { ...f };
-      for (const k of ["snmp_username", "syslog_source_ip", "site_networks"]) if (body[k] === "") body[k] = null;
+      for (const k of ["snmp_username", "syslog_source_ip", "site_networks", "site_link_zone"]) if (body[k] === "") body[k] = null;
       // Leere Secrets: beim Anlegen weglassen, beim Bearbeiten = unverändert
       for (const k of ["api_password", "snmp_auth_key", "snmp_priv_key"]) if (body[k] === "") delete body[k];
       return initial
@@ -134,6 +135,12 @@ function FirewallForm({ initial, onDone }: { initial: Firewall | null; onDone: (
         <legend className="mb-2 text-sm font-semibold">Syslog (Logs & Regelnutzung)</legend>
         <Field label="Absender-IP der Logs" hint="Nur nötig, wenn die Firewall Syslog von einer anderen IP als dem Host sendet">
           <input className="input" value={String(f.syslog_source_ip)} onChange={set("syslog_source_ip")} />
+        </Field>
+        <Field
+          label="Zone zu anderen Standorten"
+          hint="Zone des Site-to-Site-Tunnels (z.B. WG_S2S). Leer = automatisch erkennen. Für die Fehlersuche über mehrere Standorte."
+        >
+          <input className="input font-mono" placeholder="automatisch" value={String(f.site_link_zone)} onChange={set("site_link_zone")} />
         </Field>
         <Field
           label="Zusätzliche Standort-Netze"

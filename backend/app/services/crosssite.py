@@ -140,3 +140,23 @@ def verdict(hops: list[Hop]) -> tuple[str, str]:
         h = denied[0]
         return "blocked", f"Blockiert auf {h.name} (Regel: {_rules(h.deny_rules)})."
     return "unknown", "Keine eindeutige Aussage möglich."
+
+
+_LINK_KEYWORDS = ("WG", "WIREGUARD", "S2S", "SITE", "TUNNEL", "VPN", "RED")
+
+
+def detect_link_zone(objects: list[tuple[str, str, dict[str, Any]]], manual: str | None) -> tuple[str | None, str]:
+    """Zone, über die eine Firewall die anderen Standorte erreicht (z.B. WireGuard/IPsec-Tunnel).
+    Rückgabe (Zone, Herkunft). Manuelle Angabe hat Vorrang, sonst Namens-/Typ-Heuristik."""
+    if manual and manual.strip():
+        return manual.strip(), "manuell"
+    zones = {name: str(data.get("Type", "")).upper() for entity, name, data in objects if entity == "Zone"}
+    named = [z for z in zones if z.upper() != "VPN" and any(k in z.upper() for k in _LINK_KEYWORDS)]
+    if len(named) == 1:
+        return named[0], "erkannt (Name)"
+    custom_vpn = [z for z, t in zones.items() if t == "VPN" and z.upper() != "VPN"]
+    if len(custom_vpn) == 1:
+        return custom_vpn[0], "erkannt (Typ VPN)"
+    if "VPN" in zones and not named:
+        return "VPN", "erkannt (Standard-VPN-Zone)"
+    return None, "nicht erkannt" + (f" – Kandidaten: {', '.join(sorted(named))}" if named else "")

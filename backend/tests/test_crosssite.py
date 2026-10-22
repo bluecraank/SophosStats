@@ -57,3 +57,12 @@ def test_verdicts():
     assert verdict([hop(1, "origin", allowed=1, allow={"A"}), hop(2, "destination")])[0] == "incomplete"
     assert verdict([hop(1, "origin", allowed=1, allow={"A"}), hop(2, "destination", allowed=1, allow={"B"})])[0] == "ok"
     assert verdict([])[0] == "unknown"
+
+
+def test_detect_link_zone():
+    from app.services.crosssite import detect_link_zone
+
+    zones = [("Zone", "LAN", {"Type": "LAN"}), ("Zone", "WAN", {"Type": "WAN"}), ("Zone", "VPN", {"Type": "VPN"})]
+    assert detect_link_zone(zones + [("Zone", "WG_S2S", {"Type": "LAN"})], None) == ("WG_S2S", "erkannt (Name)")
+    assert detect_link_zone(zones, None) == ("VPN", "erkannt (Standard-VPN-Zone)")
+    assert detect_link_zone(zones, " Tunnel-B ") == ("Tunnel-B", "manuell")
