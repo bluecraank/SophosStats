@@ -123,6 +123,12 @@ def redact(value: Any) -> Any:
     return value
 
 
+def changed_keys(old: Any, new: Any) -> list[str]:
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return []
+    return sorted(k for k in set(old) | set(new) if old.get(k) != new.get(k))
+
+
 def _hash(data: dict) -> str:
     return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -211,6 +217,7 @@ async def poll_config(fw_id: int) -> None:
                             action="modified",
                             old=obj.data,
                             new=item,
+                            changed_keys=changed_keys(obj.data, item),
                             time=now,
                             window_start=prev_poll,
                         )

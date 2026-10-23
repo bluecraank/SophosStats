@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     retention_metrics_days: int = 90
     retention_logs_days: int = 30
     retention_rule_usage_days: int = 400
+    retention_blocked_days: int = 90
 
     cors_origins: list[str] = Field(default_factory=list)
 

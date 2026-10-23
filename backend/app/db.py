@@ -31,6 +31,7 @@ _HYPERTABLES = [
     ("log_entries", "retention_logs_days", "firewall_id"),
     ("admin_events", "retention_logs_days", "firewall_id"),
     ("rule_usage_hourly", "retention_rule_usage_days", "firewall_id"),
+    ("blocked_flows_hourly", "retention_blocked_days", "firewall_id"),
 ]
 
 _SCHEMA_LOCK_ID = 727274001
@@ -65,7 +66,18 @@ async def _redact_secrets(conn) -> None:
             )
 
 
-_PYTHON_MIGRATIONS = {"redact_secrets": _redact_secrets}
+async def _backfill_changed_keys(conn) -> None:
+    from app.collectors.poller import changed_keys
+
+    rows = (await conn.execute(text("SELECT id, old, new FROM config_changes WHERE action = 'modified'"))).all()
+    for cid, old, new in rows:
+        await conn.execute(
+            text("UPDATE config_changes SET changed_keys = CAST(:k AS JSONB) WHERE id = :i"),
+            {"k": json.dumps(changed_keys(old, new)), "i": cid},
+        )
+
+
+_PYTHON_MIGRATIONS = {"redact_secrets": _redact_secrets, "backfill_changed_keys": _backfill_changed_keys}
 
 _MIGRATIONS: list[tuple[str, str]] = [
     ("001_firewall_config_warning", "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS last_config_warning TEXT"),
@@ -92,6 +104,18 @@ _MIGRATIONS: list[tuple[str, str]] = [
     ),
     # Bereits gespeicherte Geheimnisse (z.B. VPN-PSK) aus Konfiguration und Änderungshistorie entfernen
     ("010_redact_secrets", "python:redact_secrets"),
+    ("011_change_changed_keys", "ALTER TABLE config_changes ADD COLUMN IF NOT EXISTS changed_keys JSONB"),
+    ("012_backfill_changed_keys", "python:backfill_changed_keys"),
+    (
+        # einmalig aus den vorhandenen Logs verdichten (nutzt den Teilindex ix_log_denied)
+        "013_backfill_blocked_flows",
+        "INSERT INTO blocked_flows_hourly (firewall_id, src_ip, dst_ip, dst_port, protocol, time, hits, rule_name, "
+        "last_seen) SELECT firewall_id, src_ip, coalesce(dst_ip, ''), coalesce(dst_port, 0), coalesce(protocol, ''), "
+        "date_trunc('hour', time), count(*), max(rule_name), max(time) FROM log_entries "
+        "WHERE log_type = 'Firewall' AND (log_subtype IN ('Denied', 'Drop') OR status IN ('Deny', 'Drop')) "
+        "AND firewall_id IS NOT NULL AND src_ip IS NOT NULL "
+        "GROUP BY 1, 2, 3, 4, 5, 6 ON CONFLICT DO NOTHING",
+    ),
     # Abgelehnte Verbindungen (Standortübergreifend, Bericht) ohne Scan über alle Logs finden
     (
         "009_index_log_denied",

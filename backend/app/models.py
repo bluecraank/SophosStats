@@ -138,6 +138,8 @@ class ConfigChange(Base):
     window_start: Mapped[datetime | None] = _ts(nullable=True)
     old: Mapped[dict | None] = mapped_column(JSONB)
     new: Mapped[dict | None] = mapped_column(JSONB)
+    # Oberste Felder, die sich unterscheiden – erlaubt eine schlanke Liste ohne old/new zu laden
+    changed_keys: Mapped[list | None] = mapped_column(JSONB)
 
 
 class FindingAck(Base):
@@ -238,6 +240,23 @@ class RuleLastSeen(Base):
     rule_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     rule_name: Mapped[str | None] = mapped_column(String(255))
     first_seen: Mapped[datetime] = _ts()
+    last_seen: Mapped[datetime] = _ts()
+
+
+class BlockedFlowHourly(Base):
+    """Abgelehnte Verbindungen pro Stunde verdichtet (beim Empfang gezählt). Bericht und standortübergreifende
+    Auswertung lesen hieraus statt Millionen Logzeilen zu gruppieren. Leere Felder als ''/0, da Teil des Schlüssels."""
+
+    __tablename__ = "blocked_flows_hourly"
+
+    firewall_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    src_ip: Mapped[str] = mapped_column(String(64), primary_key=True)
+    dst_ip: Mapped[str] = mapped_column(String(64), primary_key=True)
+    dst_port: Mapped[int] = mapped_column(Integer, primary_key=True)
+    protocol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    time: Mapped[datetime] = _ts(primary_key=True)
+    hits: Mapped[int] = mapped_column(BigInteger, default=0)
+    rule_name: Mapped[str | None] = mapped_column(String(255))
     last_seen: Mapped[datetime] = _ts()
 
 

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Clock, TriangleAlert, UserRound } from "lucide-react";
 import { DiffView } from "@/components/DiffView";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -80,8 +80,31 @@ function AdminEventsHint({ fwId }: { fwId: number }) {
   );
 }
 
-function ChangeDetails({ old, next }: { old: unknown; next: unknown }) {
-  const keys = changedKeys(old, next);
+/** <details>, dessen Inhalt erst beim Aufklappen gerendert wird – 200 Diffs auf einmal blockieren den Browser. */
+function LazyDetails({ summary, defaultOpen = false, children }: { summary: ReactNode; defaultOpen?: boolean; children: () => ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)} className="rounded-md border border-border bg-card">
+      {summary}
+      {open && children()}
+    </details>
+  );
+}
+
+/** Vorher/Nachher einer Änderung, erst beim Aufklappen vom Server geladen. */
+function LoadedChange({ fwId, id }: { fwId: number; id: number }) {
+  const q = useQuery({
+    queryKey: ["change", fwId, id],
+    queryFn: () => api<ConfigChange>(`/api/firewalls/${fwId}/changes/${id}`),
+    staleTime: Infinity,
+  });
+  if (q.isPending) return <div className="border-t p-3"><Loading /></div>;
+  if (q.error) return <div className="border-t p-3"><ErrorBox error={q.error} /></div>;
+  return <ChangeDetails old={q.data.old} next={q.data.new} keys={q.data.changed_keys} />;
+}
+
+function ChangeDetails({ old, next, keys: given }: { old: unknown; next: unknown; keys?: string[] }) {
+  const keys = given?.length ? given : changedKeys(old, next);
   return (
     <div className="space-y-2 border-t border-border bg-muted/30 p-3">
       {keys.length > 0 && (
@@ -116,18 +139,26 @@ function History({ fwId }: { fwId: number }) {
     <div className="space-y-2">
       <AdminEventsHint fwId={fwId} />
       {q.data.map((c, i) => (
-        <details key={c.id} open={i === 0} className="rounded-md border border-border bg-card">
-          <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5 text-sm">
-            <Pill tone={actionTone(c.action)}>{ACTION_LABEL[c.action]}</Pill>
-            <span className="text-muted-foreground">{c.entity_type}</span>
-            <span className="font-medium">{c.name}</span>
-            <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1">
-              <ChangeTime c={c} />
-              <Actors actors={c.actors} />
-            </span>
-          </summary>
-          <ChangeDetails old={c.old} next={c.new} />
-        </details>
+        <LazyDetails
+          key={c.id}
+          defaultOpen={i === 0}
+          summary={
+            <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5 text-sm">
+              <Pill tone={actionTone(c.action)}>{ACTION_LABEL[c.action]}</Pill>
+              <span className="text-muted-foreground">{c.entity_type}</span>
+              <span className="font-medium">{c.name}</span>
+              {c.changed_keys.length > 0 && (
+                <span className="truncate text-xs text-muted-foreground/70">{c.changed_keys.join(", ")}</span>
+              )}
+              <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1">
+                <ChangeTime c={c} />
+                <Actors actors={c.actors} />
+              </span>
+            </summary>
+          }
+        >
+          {() => <LoadedChange fwId={fwId} id={c.id} />}
+        </LazyDetails>
       ))}
     </div>
   );
@@ -171,15 +202,19 @@ function Since({ fwId }: { fwId: number }) {
           </p>
           <div className="space-y-2">
             {q.data.items.map((d) => (
-              <details key={`${d.entity_type}/${d.name}`} className="rounded-md border border-border bg-card">
-                <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
-                  <Pill tone={actionTone(d.action)}>{ACTION_LABEL[d.action]}</Pill>
-                  <span className="text-muted-foreground">{d.entity_type}</span>
-                  <span className="font-medium">{d.name}</span>
-                  {d.changes > 1 && <span className="text-xs text-muted-foreground/70">({d.changes} Einzeländerungen)</span>}
-                </summary>
-                <ChangeDetails old={d.old} next={d.new} />
-              </details>
+              <LazyDetails
+                key={`${d.entity_type}/${d.name}`}
+                summary={
+                  <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
+                    <Pill tone={actionTone(d.action)}>{ACTION_LABEL[d.action]}</Pill>
+                    <span className="text-muted-foreground">{d.entity_type}</span>
+                    <span className="font-medium">{d.name}</span>
+                    {d.changes > 1 && <span className="text-xs text-muted-foreground/70">({d.changes} Einzeländerungen)</span>}
+                  </summary>
+                }
+              >
+                {() => <ChangeDetails old={d.old} next={d.new} />}
+              </LazyDetails>
             ))}
           </div>
         </>

@@ -135,8 +135,10 @@ export interface ConfigChange {
   entity_type: string;
   name: string;
   action: "added" | "removed" | "modified";
-  old: unknown;
-  new: unknown;
+  /** nur in der Einzelansicht (/changes/{id}) enthalten */
+  old?: unknown;
+  new?: unknown;
+  changed_keys: string[];
   actors: ChangeActor[];
 }
 

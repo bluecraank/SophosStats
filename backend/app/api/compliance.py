@@ -8,18 +8,19 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
+from sqlalchemy.orm import defer
 
 from app.api.firewalls import get_firewall
 from app.api.stats import Hours, _since, rules_overview
 from app.models import (
     AdminEvent,
+    BlockedFlowHourly,
     ConfigChange,
     ConfigObject,
     FindingAck,
     Firewall,
     LogEntry,
     Metric,
-    denied_firewall_logs,
 )
 from app.schemas import FirewallOut
 from app.security import DB, AdminUser, CurrentUser
@@ -298,18 +299,24 @@ async def admin_events_status(fw_id: int, db: DB, _user: CurrentUser) -> dict:
     return {"count_7d": row[0], "last_at": row[1]}
 
 
-def _change_dict(c: ConfigChange, actors: dict[int, list[dict]]) -> dict:
-    return {
+# Listen laden old/new nicht mit – bei großen Objekten wären das Megabytes pro Seite
+_LIGHT = (defer(ConfigChange.old), defer(ConfigChange.new))
+
+
+def _change_dict(c: ConfigChange, actors: dict[int, list[dict]], full: bool = False) -> dict:
+    d = {
         "id": c.id,
         "time": c.time,
         "window_start": c.window_start,
         "entity_type": c.entity_type,
         "name": c.name,
         "action": c.action,
-        "old": c.old,
-        "new": c.new,
+        "changed_keys": c.changed_keys or [],
         "actors": actors.get(c.id, []),
     }
+    if full:
+        d.update(old=c.old, new=c.new)
+    return d
 
 
 @router.get("/firewalls/{fw_id}/changes")
@@ -325,6 +332,7 @@ async def changes(
         (
             await db.execute(
                 select(ConfigChange)
+                .options(*_LIGHT)
                 .where(ConfigChange.firewall_id == fw_id)
                 .order_by(ConfigChange.time.desc(), ConfigChange.id.desc())
                 .limit(limit)
@@ -384,6 +392,16 @@ async def changes_since(fw_id: int, time: datetime, db: DB, _user: CurrentUser) 
     }
 
 
+@router.get("/firewalls/{fw_id}/changes/{change_id}")
+async def change_detail(fw_id: int, change_id: int, db: DB, _user: CurrentUser) -> dict:
+    """Eine Änderung mit vollständigem Vorher/Nachher – wird erst beim Aufklappen geladen."""
+    fw = await get_firewall(db, fw_id)
+    c = await db.scalar(select(ConfigChange).where(ConfigChange.firewall_id == fw_id, ConfigChange.id == change_id))
+    if c is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Änderung nicht gefunden")
+    return _change_dict(c, await change_actors(db, fw, [c]), full=True)
+
+
 # --- Firewall-Vergleich -----------------------------------------------------------
 
 
@@ -441,6 +459,7 @@ async def report(
         (
             await db.execute(
                 select(ConfigChange)
+                .options(*_LIGHT)
                 .where(ConfigChange.firewall_id == fw_id, ConfigChange.time >= start, ConfigChange.time < end)
                 .order_by(ConfigChange.time)
                 .limit(1000)
@@ -461,16 +480,15 @@ async def report(
 
     blocked = (
         await db.execute(
-            select(LogEntry.src_ip, func.count().label("hits"))
+            # aus der stündlichen Verdichtung statt aller abgelehnten Logzeilen des Zeitraums
+            select(BlockedFlowHourly.src_ip, func.sum(BlockedFlowHourly.hits).label("hits"))
             .where(
-                LogEntry.firewall_id == fw_id,
-                LogEntry.time >= start,
-                LogEntry.time < end,
-                denied_firewall_logs(),
-                LogEntry.src_ip.is_not(None),
+                BlockedFlowHourly.firewall_id == fw_id,
+                BlockedFlowHourly.time >= start,
+                BlockedFlowHourly.time < end,
             )
-            .group_by(LogEntry.src_ip)
-            .order_by(func.count().desc())
+            .group_by(BlockedFlowHourly.src_ip)
+            .order_by(func.sum(BlockedFlowHourly.hits).desc())
             .limit(10)
         )
     ).all()
@@ -502,7 +520,7 @@ async def report(
         "top_rules": [
             {"name": r["name"], "position": r["position"], "action": r["action"], **r["usage"]} for r in top_rules
         ],
-        "top_blocked_sources": [{"src_ip": r.src_ip, "hits": r.hits} for r in blocked],
+        "top_blocked_sources": [{"src_ip": r.src_ip, "hits": int(r.hits)} for r in blocked],
         "changes": [_change_dict(c, actors) for c in change_rows],
         "change_summary": dict(Counter(c.action for c in change_rows)),
         "admin_events": admin_events or 0,

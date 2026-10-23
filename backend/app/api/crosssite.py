@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select, tuple_
 
 from app.api.stats import Hours, _since
-from app.models import ConfigObject, Firewall, LogEntry, denied_firewall_logs
+from app.models import BlockedFlowHourly, ConfigObject, Firewall, LogEntry, denied_firewall_logs
 from app.security import DB, CurrentUser
 from app.services.crosssite import INTERFACE_ENTITIES, Hop, SiteMap, networks_from_config, parse_manual, verdict
 
@@ -188,20 +188,25 @@ async def cross_site_blocked(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dafür werden mindestens zwei Firewalls benötigt")
     names = {fw.id: fw.name for fw in firewalls}
     since = _since(hours)
+    B = BlockedFlowHourly
     key_cols = (LogEntry.src_ip, LogEntry.dst_ip, LogEntry.dst_port, LogEntry.protocol)
 
     denied_rows = (
         await db.execute(
+            # aus der stündlichen Verdichtung statt aller abgelehnten Logzeilen
             select(
-                LogEntry.firewall_id,
-                *key_cols,
-                func.max(LogEntry.rule_name).label("rule"),
-                func.count().label("n"),
-                func.max(LogEntry.time).label("last"),
+                B.firewall_id,
+                B.src_ip,
+                B.dst_ip,
+                B.dst_port,
+                B.protocol,
+                func.max(B.rule_name).label("rule"),
+                func.sum(B.hits).label("n"),
+                func.max(B.last_seen).label("last"),
             )
-            .where(LogEntry.time > since, _denied(), LogEntry.src_ip.is_not(None))
-            .group_by(LogEntry.firewall_id, *key_cols)
-            .order_by(func.count().desc())
+            .where(B.time >= since.replace(minute=0, second=0, microsecond=0))
+            .group_by(B.firewall_id, B.src_ip, B.dst_ip, B.dst_port, B.protocol)
+            .order_by(func.sum(B.hits).desc())
             .limit(20_000)
         )
     ).all()
@@ -212,10 +217,11 @@ async def cross_site_blocked(
         s, d = site_map.site_of(r.src_ip), site_map.site_of(r.dst_ip)
         if s is None or d is None or s == d:
             continue
-        key = (r.src_ip, r.dst_ip, r.dst_port, r.protocol)
+        # leere Schlüsselteile der Verdichtung ('' / 0) wieder als "nicht vorhanden" führen
+        key = (r.src_ip, r.dst_ip or None, r.dst_port or None, r.protocol or None)
         f = flows.setdefault(key, {"src_site": s, "dst_site": d, "blocked": {}, "attempts": 0, "last": r.last})
         f["blocked"][r.firewall_id] = r.rule or "unbekannt"
-        f["attempts"] += r.n
+        f["attempts"] += int(r.n)
         f["last"] = max(f["last"], r.last)
     if not flows:
         return {"hours": hours, "items": [], "total": 0}

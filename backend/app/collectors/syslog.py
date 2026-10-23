@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.collectors import sfos_log
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import AdminEvent, Firewall, LogEntry, RuleLastSeen, RuleUsageHourly
+from app.models import AdminEvent, BlockedFlowHourly, Firewall, LogEntry, RuleLastSeen, RuleUsageHourly
 
 log = logging.getLogger(__name__)
 
@@ -147,6 +147,7 @@ class SyslogServer:
         await self._refresh_source_map()
         rows: list[dict] = []
         admin_rows: list[dict] = []
+        blocked: dict[tuple, dict] = {}
         usage: dict[tuple[int, int, datetime], dict] = defaultdict(
             lambda: {"hits": 0, "denied": 0, "sent_bytes": 0, "recv_bytes": 0, "sent_pkts": 0, "recv_pkts": 0}
         )
@@ -200,6 +201,22 @@ class SyslogServer:
                     }
                 )
 
+            src_ip = parsed.get("src_ip")
+            if parsed.log_type == "Firewall" and parsed.is_denied and src_ip:
+                hour = parsed.time.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+                key = (
+                    fw_id,
+                    src_ip,
+                    parsed.get("dst_ip") or "",
+                    parsed.get_int("dst_port") or 0,
+                    parsed.get("protocol") or "",
+                    hour,
+                )
+                b = blocked.setdefault(key, {"hits": 0, "last_seen": parsed.time, "rule_name": None})
+                b["hits"] += 1
+                b["last_seen"] = max(b["last_seen"], parsed.time)
+                b["rule_name"] = parsed.rule_name or b["rule_name"]
+
             if parsed.log_type == "Firewall" and parsed.rule_id is not None:
                 bucket = parsed.time.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
                 agg = usage[(fw_id, parsed.rule_id, bucket)]
@@ -221,6 +238,32 @@ class SyslogServer:
             await db.execute(insert(LogEntry), rows)
             if admin_rows:
                 await db.execute(insert(AdminEvent), admin_rows)
+            if blocked:
+                bstmt = pg_insert(BlockedFlowHourly).values(
+                    [
+                        {
+                            "firewall_id": k[0],
+                            "src_ip": k[1],
+                            "dst_ip": k[2],
+                            "dst_port": k[3],
+                            "protocol": k[4],
+                            "time": k[5],
+                            **v,
+                        }
+                        for k, v in blocked.items()
+                    ]
+                )
+                bc = BlockedFlowHourly.__table__.c
+                await db.execute(
+                    bstmt.on_conflict_do_update(
+                        index_elements=["firewall_id", "src_ip", "dst_ip", "dst_port", "protocol", "time"],
+                        set_={
+                            "hits": bc.hits + bstmt.excluded.hits,
+                            "last_seen": func.greatest(bc.last_seen, bstmt.excluded.last_seen),
+                            "rule_name": func.coalesce(bstmt.excluded.rule_name, bc.rule_name),
+                        },
+                    )
+                )
             if usage:
                 values = [
                     {"firewall_id": fw, "rule_id": rid, "time": bucket, **agg}
