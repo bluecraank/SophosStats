@@ -1,7 +1,9 @@
 import hashlib
 import json
 import logging
+import re
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import insert, select, update
 
@@ -108,6 +110,19 @@ async def poll_metrics(fw_id: int) -> None:
 # --- Konfiguration -----------------------------------------------------------
 
 
+# Geheimnisse (VPN-PSK, Passwörter, private Schlüssel) nie speichern – auch Betrachter sehen die Konfiguration
+_SECRET_KEY = re.compile(r"(password|passphrase|secret|presharedkey|psk|privatekey|private_key)$", re.IGNORECASE)
+REDACTED = "***"
+
+
+def redact(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: (REDACTED if _SECRET_KEY.search(k) and v not in ("", None) else redact(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact(v) for v in value]
+    return value
+
+
 def _hash(data: dict) -> str:
     return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -151,7 +166,8 @@ async def poll_config(fw_id: int) -> None:
                 errors.append(f"{res.entity}: {res.error}")
                 continue
             seen: set[str] = set()
-            for pos, item in enumerate(res.items):
+            for pos, raw in enumerate(res.items):
+                item = redact(raw)
                 name = _item_name(item, pos)
                 if name in seen:
                     continue
@@ -183,7 +199,10 @@ async def poll_config(fw_id: int) -> None:
                             )
                         )
                     continue
-                if obj.hash != digest:
+                if obj.hash != digest and redact(obj.data) == item:
+                    # Unterschied nur durch nachträgliches Ausblenden von Geheimnissen – keine echte Änderung
+                    obj.data, obj.hash, obj.updated_at = item, digest, now
+                elif obj.hash != digest:
                     db.add(
                         ConfigChange(
                             firewall_id=fw.id,

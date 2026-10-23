@@ -75,7 +75,8 @@ export function RulesTab({ fwId }: { fwId: number }) {
   const q = useQuery({
     queryKey: ["rules", fwId, hours],
     queryFn: () => api<RulesResponse>(`/api/firewalls/${fwId}/rules`, { params: { hours } }),
-    refetchInterval: 60_000,
+    // Regelnutzung ändert sich stündlich – 5 min reichen und schonen die Datenbank
+    refetchInterval: 5 * 60_000,
   });
 
   const rules = useMemo(() => {

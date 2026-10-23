@@ -25,18 +25,22 @@ class Scheduler:
         self.running: dict[tuple[int, str], asyncio.Task] = {}
         # Letzter Versuch (auch fehlgeschlagene), damit Fehler nicht bei jedem Tick neu versucht werden
         self.last_attempt: dict[tuple[int, str], datetime] = {}
+        # Per "Jetzt abrufen" angeforderte, noch nicht gestartete Abrufe (läuft gerade einer, startet er danach)
+        self.forced: set[tuple[int, str]] = set()
 
     def _due(self, key: tuple[int, str], last_ok: datetime | None, interval_s: int, now: datetime) -> bool:
         last = max((t for t in (last_ok, self.last_attempt.get(key)) if t), default=None)
         return last is None or now - last >= timedelta(seconds=interval_s)
 
-    def _spawn(self, key: tuple[int, str], job: Callable[[int], Awaitable[None]], now: datetime) -> None:
+    def _spawn(self, key: tuple[int, str], job: Callable[[int], Awaitable[None]], now: datetime) -> bool:
+        """Startet den Job, falls er nicht schon läuft. False = läuft bereits."""
         if key in self.running and not self.running[key].done():
-            return
+            return False
         self.last_attempt[key] = now
         task = asyncio.create_task(job(key[0]), name=f"{key[1]}-{key[0]}")
         task.add_done_callback(self._done)
         self.running[key] = task
+        return True
 
     @staticmethod
     def _done(task: asyncio.Task) -> None:
@@ -48,15 +52,16 @@ class Scheduler:
         async with SessionLocal() as db:
             firewalls = (await db.execute(select(Firewall).where(Firewall.enabled))).scalars().all()
         for fw in firewalls:
-            forced = fw.poll_requested
-            key = (fw.id, "metrics")
-            if fw.snmp_enabled and (forced or self._due(key, fw.last_metrics_at, fw.metrics_interval_s, now)):
-                self._spawn(key, poller.poll_metrics, now)
-            key = (fw.id, "config")
-            if forced or self._due(key, fw.last_config_at, fw.config_interval_s, now):
-                self._spawn(key, poller.poll_config, now)
-            if forced:
+            if fw.poll_requested:
+                self.forced.update({(fw.id, "config")} | ({(fw.id, "metrics")} if fw.snmp_enabled else set()))
                 await poller.clear_poll_request(fw.id)
+            jobs = [("config", poller.poll_config, fw.last_config_at, fw.config_interval_s)]
+            if fw.snmp_enabled:
+                jobs.append(("metrics", poller.poll_metrics, fw.last_metrics_at, fw.metrics_interval_s))
+            for kind, job, last_ok, interval in jobs:
+                key = (fw.id, kind)
+                if (key in self.forced or self._due(key, last_ok, interval, now)) and self._spawn(key, job, now):
+                    self.forced.discard(key)
 
     async def run(self, stop: asyncio.Event) -> None:
         tick = get_settings().scheduler_tick_seconds

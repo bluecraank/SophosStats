@@ -115,11 +115,15 @@ class SophosXmlApi:
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(verify=self.verify_tls, timeout=httpx.Timeout(30.0, connect=10.0))
 
-    async def test(self) -> str | None:
-        """Prüft Login. Gibt die API-Version zurück."""
+    async def test(self) -> tuple[str | None, list[str]]:
+        """Prüft Login und Leserechte für die wichtigsten Bereiche.
+        Rückgabe: (API-Version, Entitäten ohne Leserecht)."""
+        missing = []
         async with self._client() as client:
-            await self._call(client, "<Get><FirewallRule></FirewallRule></Get>")
-        return self.api_version
+            for entity in ("FirewallRule", "IPHost", "Zone", "Services"):
+                if (await self.get_entity(client, entity)).no_permission:
+                    missing.append(entity)
+        return self.api_version, missing
 
     async def get_entity(self, client: httpx.AsyncClient, entity: str) -> EntityResult:
         try:

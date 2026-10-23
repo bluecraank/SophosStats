@@ -91,8 +91,11 @@ async def request_poll(fw_id: int, db: DB, _admin: AdminUser) -> dict:
 async def test_firewall(fw_id: int, db: DB, _admin: AdminUser) -> TestResult:
     fw = await get_firewall(db, fw_id)
     try:
-        version = await poller.xml_client(fw).test()
-        xml_ok, xml_msg = True, f"Login erfolgreich (API-Version {version or '?'})"
+        version, missing = await poller.xml_client(fw).test()
+        xml_ok = not missing
+        xml_msg = f"Login erfolgreich (API-Version {version or '?'})"
+        if missing:
+            xml_msg += f", aber keine Leserechte für: {', '.join(missing)} – Admin-Profil des API-Benutzers prüfen"
     except Exception as exc:
         xml_ok, xml_msg = False, f"{type(exc).__name__}: {exc}"
 

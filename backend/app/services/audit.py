@@ -16,26 +16,35 @@ _ANY_SCHEDULES = {None, "", "All The Time", "All the time"}
 _AUDITED_POLICY_TYPES = {None, "Network", "User"}
 
 
-def _dim_covers(upper: list[str], lower: list[str]) -> bool:
+def _dim_covers(upper: frozenset[str], lower: frozenset[str]) -> bool:
     if not upper:
         return True  # Any deckt alles ab
     if not lower:
         return False  # konkrete Liste deckt kein Any ab
-    return set(lower) <= set(upper)
+    return lower <= upper
 
 
-def covers(upper: dict[str, Any], lower: dict[str, Any]) -> bool:
-    """True, wenn jede Verbindung, die `lower` trifft, auch von `upper` getroffen wird."""
+def _sets(rule: dict[str, Any]) -> dict[str, frozenset[str]]:
+    """Listen einmal je Regel in Mengen wandeln – der Paarvergleich läuft bei vielen Regeln hunderttausendfach."""
+    return {d: frozenset(rule.get(d) or ()) for d in (*_DIMENSIONS, "identities")}
+
+
+def _covers(upper: dict[str, Any], lower: dict[str, Any], us: dict[str, frozenset], ls: dict[str, frozenset]) -> bool:
     if upper.get("ip_family") and lower.get("ip_family") and upper["ip_family"] != lower["ip_family"]:
         return False
-    if not all(_dim_covers(upper.get(d) or [], lower.get(d) or []) for d in _DIMENSIONS):
+    if not all(_dim_covers(us[d], ls[d]) for d in _DIMENSIONS):
         return False
     # Benutzerregel greift nur für ihre Identitäten
-    if upper.get("identities") and not _dim_covers(upper["identities"], lower.get("identities") or []):
+    if us["identities"] and not _dim_covers(us["identities"], ls["identities"]):
         return False
     if upper.get("schedule") not in _ANY_SCHEDULES and upper.get("schedule") != lower.get("schedule"):
         return False
     return True
+
+
+def covers(upper: dict[str, Any], lower: dict[str, Any]) -> bool:
+    """True, wenn jede Verbindung, die `lower` trifft, auch von `upper` getroffen wird."""
+    return _covers(upper, lower, _sets(upper), _sets(lower))
 
 
 _SEVERITY_BY_OPEN = {1: "low", 2: "medium", 3: "high"}
@@ -121,11 +130,10 @@ def audit_rules(
             )
 
     # Verdeckte/redundante Regeln: eine aktive Regel weiter oben deckt die Regel vollständig ab
-    for i, lower in enumerate(active):
-        if lower.get("policy_type") not in _AUDITED_POLICY_TYPES:
-            continue
-        for upper in active[:i]:
-            if upper.get("policy_type") not in _AUDITED_POLICY_TYPES or not covers(upper, lower):
+    audited = [(r, _sets(r)) for r in active if r.get("policy_type") in _AUDITED_POLICY_TYPES]
+    for i, (lower, ls) in enumerate(audited):
+        for upper, us in audited[:i]:
+            if not _covers(upper, lower, us, ls):
                 continue
             if upper.get("action") == lower.get("action"):
                 findings.append(

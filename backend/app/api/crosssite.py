@@ -6,10 +6,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, or_, select, tuple_
+from sqlalchemy import func, select, tuple_
 
 from app.api.stats import Hours, _since
-from app.models import ConfigObject, Firewall, LogEntry
+from app.models import ConfigObject, Firewall, LogEntry, denied_firewall_logs
 from app.security import DB, CurrentUser
 from app.services.crosssite import INTERFACE_ENTITIES, Hop, SiteMap, networks_from_config, parse_manual, verdict
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api", tags=["cross-site"])
 
 
 def _denied():
-    return or_(LogEntry.log_subtype.ilike("denied"), LogEntry.status.ilike("deny"), LogEntry.status.ilike("drop"))
+    return denied_firewall_logs()
 
 
 async def load_sites(db: DB) -> tuple[list[Firewall], dict[int, list[dict]], SiteMap]:
@@ -199,7 +199,7 @@ async def cross_site_blocked(
                 func.count().label("n"),
                 func.max(LogEntry.time).label("last"),
             )
-            .where(LogEntry.time > since, LogEntry.log_type == "Firewall", _denied(), LogEntry.src_ip.is_not(None))
+            .where(LogEntry.time > since, _denied(), LogEntry.src_ip.is_not(None))
             .group_by(LogEntry.firewall_id, *key_cols)
             .order_by(func.count().desc())
             .limit(20_000)

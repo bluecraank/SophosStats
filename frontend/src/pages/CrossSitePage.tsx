@@ -6,6 +6,7 @@ import {
   CircleHelp,
   CircleX,
   Monitor,
+  RefreshCw,
   Route,
   Search,
   Server,
@@ -250,19 +251,25 @@ function BlockedTable({ onTrace }: { onTrace: (p: TraceParams) => void }) {
   const q = useQuery({
     queryKey: ["cross-blocked", hours],
     queryFn: () => api<{ items: BlockedItem[]; total: number }>("/api/cross-site/blocked", { params: { hours } }),
-    refetchInterval: 60_000,
+    // Teure Gruppierung über alle abgelehnten Verbindungen – nur auf Anforderung neu laden
+    staleTime: 5 * 60_000,
   });
   return (
     <Card
       title="Blockiert zwischen Standorten"
       icon={ShieldAlert}
       actions={
+        <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isFetching} title="Neu laden">
+          <RefreshCw className={q.isFetching ? "animate-spin" : ""} />
+        </Button>
         <Select value={String(hours)} onValueChange={(v) => setHours(Number(v))}>
           <SelectTrigger size="sm" className="w-36"><SelectValue /></SelectTrigger>
           <SelectContent>
             {RANGES.map((r) => <SelectItem key={r.hours} value={String(r.hours)}>Letzte {r.label}</SelectItem>)}
           </SelectContent>
         </Select>
+        </div>
       }
     >
       <ErrorBox error={q.error} />

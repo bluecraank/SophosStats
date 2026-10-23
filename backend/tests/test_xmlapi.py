@@ -32,3 +32,21 @@ async def test_entity_status_codes():
     assert gateway.unsupported
     assert host.error is None and host.items == [{"Name": "srv1", "IPAddress": "10.0.0.1"}]
     assert api.api_version == "2000.1"
+
+
+async def test_connection_test_reports_missing_permissions(monkeypatch):
+    api = SophosXmlApi("fw", 4444, "user", "pw")
+
+    def client():
+        return httpx.AsyncClient(transport=httpx.MockTransport(_handler_all))
+
+    monkeypatch.setattr(api, "_client", client)
+    version, missing = await api.test()
+    assert version == "2000.1" and missing == ["Zone"]
+
+
+def _handler_all(request: httpx.Request) -> httpx.Response:
+    reqxml = parse_qs(request.content.decode())["reqxml"][0]
+    entity = reqxml.split("<Get><", 1)[1].split(">", 1)[0]
+    body = RESPONSES.get(entity, RESPONSES["IPHost"].replace("IPHost", entity))
+    return httpx.Response(200, content=body.encode())

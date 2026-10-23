@@ -58,3 +58,19 @@ def test_interface_rows_compute_bps():
     )
     assert second[0]["in_bps"] == 8000.0
     assert second[0]["out_bps"] == 16000.0
+
+
+def test_redact_secrets():
+    from app.collectors.poller import REDACTED, redact
+
+    data = {
+        "Name": "Tunnel",
+        "Authentication": {"PresharedKey": "geheim", "AuthenticationType": "PresharedKey"},
+        "Peers": [{"PrivateKey": "abc", "PublicKey": "pub"}],
+        "Password": "",
+    }
+    r = redact(data)
+    assert r["Authentication"]["PresharedKey"] == REDACTED
+    assert r["Authentication"]["AuthenticationType"] == "PresharedKey"  # Wert, kein Schlüssel – bleibt
+    assert r["Peers"][0] == {"PrivateKey": REDACTED, "PublicKey": "pub"}
+    assert r["Password"] == ""  # leere Felder nicht verändern

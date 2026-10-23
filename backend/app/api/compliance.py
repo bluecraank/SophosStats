@@ -7,11 +7,20 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, select
 
 from app.api.firewalls import get_firewall
 from app.api.stats import Hours, _since, rules_overview
-from app.models import AdminEvent, ConfigChange, ConfigObject, FindingAck, Firewall, LogEntry, Metric
+from app.models import (
+    AdminEvent,
+    ConfigChange,
+    ConfigObject,
+    FindingAck,
+    Firewall,
+    LogEntry,
+    Metric,
+    denied_firewall_logs,
+)
 from app.schemas import FirewallOut
 from app.security import DB, AdminUser, CurrentUser
 from app.services.audit import audit_rules
@@ -457,8 +466,7 @@ async def report(
                 LogEntry.firewall_id == fw_id,
                 LogEntry.time >= start,
                 LogEntry.time < end,
-                LogEntry.log_type == "Firewall",
-                or_(LogEntry.log_subtype.ilike("denied"), LogEntry.status.ilike("deny")),
+                denied_firewall_logs(),
                 LogEntry.src_ip.is_not(None),
             )
             .group_by(LogEntry.src_ip)

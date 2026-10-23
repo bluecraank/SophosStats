@@ -14,7 +14,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    and_,
     func,
+    literal_column,
+    or_,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -254,3 +257,16 @@ class RuleUsageHourly(Base):
     sent_pkts: Mapped[int] = mapped_column(BigInteger, default=0)
     recv_pkts: Mapped[int] = mapped_column(BigInteger, default=0)
     last_seen: Mapped[datetime] = _ts()
+
+
+def denied_firewall_logs():
+    """Abgelehnte Firewall-Verbindungen. Mit festen Literalen (keine Bind-Parameter) formuliert, damit
+    PostgreSQL den Teilindex ix_log_denied nutzen kann – dessen Bedingung muss exakt so lauten."""
+    lit = literal_column
+    return and_(
+        LogEntry.log_type == lit("'Firewall'"),
+        or_(
+            LogEntry.log_subtype.in_([lit("'Denied'"), lit("'Drop'")]),
+            LogEntry.status.in_([lit("'Deny'"), lit("'Drop'")]),
+        ),
+    )

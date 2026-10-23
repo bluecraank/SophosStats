@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import AsyncIterator
 
@@ -34,25 +35,69 @@ _HYPERTABLES = [
 
 _SCHEMA_LOCK_ID = 727274001
 
-_ADDED_COLUMNS = [
-    "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS last_config_warning TEXT",
-    "ALTER TABLE config_changes ADD COLUMN IF NOT EXISTS window_start TIMESTAMPTZ",
-    "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS site_networks TEXT",
-    "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS site_link_zone VARCHAR(100)",
+
+# Schema-Ergänzungen, die create_all nicht abdeckt. Jede läuft genau einmal (vermerkt in schema_migrations) –
+# wichtig für die Erstbefüllungen, die sonst bei jedem Start die Log-Tabelle scannen würden.
+async def _redact_secrets(conn) -> None:
+    """Bereits gespeicherte Geheimnisse aus Konfiguration und Änderungshistorie entfernen."""
+    from app.collectors.poller import _hash, redact
+
+    rows = (await conn.execute(text("SELECT firewall_id, entity_type, name, data FROM config_objects"))).all()
+    for fw_id, entity, name, data in rows:
+        clean = redact(data)
+        if clean != data:
+            await conn.execute(
+                text(
+                    "UPDATE config_objects SET data = CAST(:d AS JSONB), hash = :h "
+                    "WHERE firewall_id = :f AND entity_type = :e AND name = :n"
+                ),
+                {"d": json.dumps(clean), "h": _hash(clean), "f": fw_id, "e": entity, "n": name},
+            )
+    for cid, old, new in (await conn.execute(text("SELECT id, old, new FROM config_changes"))).all():
+        if redact(old) != old or redact(new) != new:
+            await conn.execute(
+                text("UPDATE config_changes SET old = CAST(:o AS JSONB), new = CAST(:n AS JSONB) WHERE id = :i"),
+                {
+                    "o": json.dumps(redact(old)) if old is not None else None,
+                    "n": json.dumps(redact(new)) if new is not None else None,
+                    "i": cid,
+                },
+            )
+
+
+_PYTHON_MIGRATIONS = {"redact_secrets": _redact_secrets}
+
+_MIGRATIONS: list[tuple[str, str]] = [
+    ("001_firewall_config_warning", "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS last_config_warning TEXT"),
+    ("002_change_window_start", "ALTER TABLE config_changes ADD COLUMN IF NOT EXISTS window_start TIMESTAMPTZ"),
+    ("003_firewall_site_networks", "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS site_networks TEXT"),
+    ("004_firewall_site_link_zone", "ALTER TABLE firewalls ADD COLUMN IF NOT EXISTS site_link_zone VARCHAR(100)"),
     # Korrelation von Verbindungen über mehrere Firewalls (Quelle/Ziel im Zeitfenster)
-    "CREATE INDEX IF NOT EXISTS ix_log_flow ON log_entries (src_ip, dst_ip, time)",
-    "CREATE INDEX IF NOT EXISTS ix_log_dst ON log_entries (dst_ip, time)",
-    # rule_last_seen einmalig aus der stündlichen Nutzung befüllen; der One-Time-Filter überspringt die
-    # Aggregation komplett, sobald die Tabelle Daten enthält
-    "INSERT INTO rule_last_seen (firewall_id, rule_id, rule_name, first_seen, last_seen) "
-    "SELECT firewall_id, rule_id, max(rule_name), min(time), max(last_seen) FROM rule_usage_hourly "
-    "WHERE NOT EXISTS (SELECT 1 FROM rule_last_seen) GROUP BY firewall_id, rule_id",
-    # admin_events einmalig aus den vorhandenen Logs befüllen (gleiche Regel wie sfos_log.ParsedLog.is_admin)
-    "INSERT INTO admin_events (time, firewall_id, user_name, src_ip, component, message) "
-    "SELECT time, firewall_id, user_name, src_ip, log_component, message FROM log_entries "
-    "WHERE NOT EXISTS (SELECT 1 FROM admin_events) AND firewall_id IS NOT NULL AND ("
-    "log_subtype ILIKE '%admin%' OR log_type ILIKE '%admin%' "
-    "OR log_component IN ('GUI', 'CLI', 'API', 'Console', 'SSH', 'Admin', 'Central'))",
+    ("005_index_log_flow", "CREATE INDEX IF NOT EXISTS ix_log_flow ON log_entries (src_ip, dst_ip, time)"),
+    ("006_index_log_dst", "CREATE INDEX IF NOT EXISTS ix_log_dst ON log_entries (dst_ip, time)"),
+    (
+        "007_backfill_rule_last_seen",
+        "INSERT INTO rule_last_seen (firewall_id, rule_id, rule_name, first_seen, last_seen) "
+        "SELECT firewall_id, rule_id, max(rule_name), min(time), max(last_seen) FROM rule_usage_hourly "
+        "GROUP BY firewall_id, rule_id ON CONFLICT DO NOTHING",
+    ),
+    (
+        # gleiche Regel wie sfos_log.ParsedLog.is_admin
+        "008_backfill_admin_events",
+        "INSERT INTO admin_events (time, firewall_id, user_name, src_ip, component, message) "
+        "SELECT time, firewall_id, user_name, src_ip, log_component, message FROM log_entries "
+        "WHERE NOT EXISTS (SELECT 1 FROM admin_events) AND firewall_id IS NOT NULL AND ("
+        "log_subtype ILIKE '%admin%' OR log_type ILIKE '%admin%' "
+        "OR log_component IN ('GUI', 'CLI', 'API', 'Console', 'SSH', 'Admin', 'Central'))",
+    ),
+    # Bereits gespeicherte Geheimnisse (z.B. VPN-PSK) aus Konfiguration und Änderungshistorie entfernen
+    ("010_redact_secrets", "python:redact_secrets"),
+    # Abgelehnte Verbindungen (Standortübergreifend, Bericht) ohne Scan über alle Logs finden
+    (
+        "009_index_log_denied",
+        "CREATE INDEX IF NOT EXISTS ix_log_denied ON log_entries (time) WHERE log_type = 'Firewall' "
+        "AND (log_subtype IN ('Denied', 'Drop') OR status IN ('Deny', 'Drop'))",
+    ),
 ]
 
 
@@ -72,13 +117,26 @@ async def init_schema() -> None:
             log.warning("TimescaleDB nicht verfügbar – Retention/Kompression deaktiviert")
             timescale = False
         await conn.run_sync(Base.metadata.create_all)
-        # create_all ergänzt keine Spalten in bestehenden Tabellen – nachträglich hinzugekommene hier nachziehen
-        for stmt in _ADDED_COLUMNS:
+        await conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS schema_migrations "
+                "(id VARCHAR(100) PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+            )
+        )
+        applied = set((await conn.execute(text("SELECT id FROM schema_migrations"))).scalars())
+        for mig_id, stmt in _MIGRATIONS:
+            if mig_id in applied:
+                continue
             try:
                 async with conn.begin_nested():
-                    await conn.execute(text(stmt))
-            except Exception as exc:  # noqa: BLE001 - z.B. Index auf komprimierter Hypertable
-                log.warning("Schema-Ergänzung übersprungen (%s): %s", stmt[:60], exc)
+                    if stmt.startswith("python:"):
+                        await _PYTHON_MIGRATIONS[stmt.removeprefix("python:")](conn)
+                    else:
+                        await conn.execute(text(stmt))
+                    await conn.execute(text("INSERT INTO schema_migrations (id) VALUES (:id)"), {"id": mig_id})
+                log.info("Migration %s ausgeführt", mig_id)
+            except Exception as exc:  # noqa: BLE001 - z.B. Index auf komprimierter Hypertable; nächster Start erneut
+                log.warning("Migration %s übersprungen: %s", mig_id, exc)
 
         if not timescale:
             return
