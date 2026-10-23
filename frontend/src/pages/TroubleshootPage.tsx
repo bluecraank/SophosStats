@@ -18,6 +18,7 @@ import { Link, useSearchParams } from "react-router";
 import { Card, ErrorBox, Loading, PageHeader, Pill } from "@/components/ui";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { HostInput } from "@/components/HostInput";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -277,13 +278,13 @@ export function TroubleshootPage() {
       <Card title="Verbindung prüfen" icon={Stethoscope}>
         <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
           <label className="space-y-1">
-            <span className="label">Quelle (IP)</span>
-            <Input className="w-44 font-mono" placeholder="10.50.10.5" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} required />
+            <span className="label">Quelle (IP oder Hostname)</span>
+            <HostInput className="w-56" placeholder="10.50.10.5 oder EDV-" value={form.source} onChange={(v) => setForm({ ...form, source: v })} onPick={(h) => setForm({ ...form, source: h.ip })} required />
           </label>
           <ArrowRight className="mb-2.5 size-4 text-muted-foreground" />
           <label className="space-y-1">
             <span className="label">Ziel (IP oder Website)</span>
-            <Input className="w-64 font-mono" placeholder="10.60.10.1 oder www.example.com" value={form.destination} onChange={(e) => setForm({ ...form, destination: e.target.value })} required />
+            <HostInput className="w-64" placeholder="10.60.10.1, Hostname oder Website" value={form.destination} onChange={(v) => setForm({ ...form, destination: v })} onPick={(h) => setForm({ ...form, destination: h.ip })} required />
           </label>
           <label className="space-y-1">
             <span className="label">Dienst</span>

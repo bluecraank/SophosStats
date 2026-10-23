@@ -1,6 +1,7 @@
 """Standortübergreifende Auswertung: Standort-Netze, Pfadverfolgung einer Verbindung über mehrere
 Firewalls und Übersicht blockierter Verbindungen zwischen Standorten."""
 
+import ipaddress
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -92,6 +93,19 @@ def _hop_dict(h: Hop) -> dict:
     }
 
 
+async def _as_ip(db: DB, value: str) -> str:
+    """IP unverändert, Hostname über gelernte Namen/Objekte/DNS auflösen."""
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        from app.api.hosts import resolve_name
+
+        ips = await resolve_name(db, value)
+        if not ips:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"„{value}“ konnte nicht aufgelöst werden") from None
+        return ips[0]
+
+
 @router.get("/trace")
 async def trace(
     db: DB,
@@ -106,6 +120,7 @@ async def trace(
 ) -> dict:
     """Verfolgt eine Verbindung über alle Firewalls. Mit `time` wird ein Zeitfenster um diesen Zeitpunkt
     betrachtet (z.B. aus einem Logeintrag), sonst der gesamte Zeitraum `hours`."""
+    src_ip, dst_ip = await _as_ip(db, src_ip), await _as_ip(db, dst_ip)
     firewalls, _, site_map = await load_sites(db)
     names = {fw.id: fw.name for fw in firewalls}
     origin, dest = site_map.site_of(src_ip), site_map.site_of(dst_ip)

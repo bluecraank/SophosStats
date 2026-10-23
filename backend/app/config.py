@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     retention_rule_usage_days: int = 400
     retention_blocked_days: int = 90
 
+    # Reverse-DNS der in den Logs gesehenen IPs (Hostnamen in Suche und Anzeige)
+    rdns_enabled: bool = True
+    rdns_private_only: bool = True  # öffentliche IPs nicht nachschlagen (keine externen DNS-Anfragen)
+    rdns_ttl_hours: int = 24
+    rdns_concurrency: int = 10
+
     cors_origins: list[str] = Field(default_factory=list)
 
 

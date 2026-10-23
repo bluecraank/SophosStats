@@ -62,6 +62,13 @@ blockierter Verbindungen über mehrere Standorte.
 - Konfiguration „Stand am Datum X“, Vergleich mit heute, Vergleich zweier Firewalls
 - **Druckbarer Bericht** für einen Zeitraum, als PDF über den Browser, inklusive akzeptierter Hinweise
 
+**Hostnamen**
+- Die IPs aus den Logs werden im Hintergrund per **Reverse-DNS** in Hostnamen übersetzt (gedrosselt, mit Cache,
+  standardmäßig nur interne IPs); zusätzlich zählen die Host-Objekte der Firewalls als Namen
+- Suchfelder schlagen beim Tippen bekannte Hosts vor (`EDV-` → alle Hosts mit diesem Anfang, `10.50.` → alle Hosts
+  im Bereich); ein eingegebener Hostname wird automatisch in seine IP aufgelöst
+- Unter jeder IP in den Logs steht der bekannte Hostname
+
 **Logs**
 - Alle Logs per Syslog, mit Volltextsuche und **kombinierbaren Filtern**: Subnetz (CIDR), Ports, beliebige Rohfelder
 - Klick auf einen Wert filtert danach, Strg+Klick schließt ihn aus. Die Suche steht in der URL und lässt sich teilen.
@@ -191,6 +198,9 @@ Alle Einstellungen sind Umgebungsvariablen. Lokal kommen sie aus der `.env`, in 
 | `RETENTION_METRICS_DAYS` | | `90` | Aufbewahrung von CPU/RAM/Interface-Werten |
 | `RETENTION_LOGS_DAYS` | | `30` | Aufbewahrung der Logs |
 | `RETENTION_RULE_USAGE_DAYS` | | `400` | Aufbewahrung der stündlichen Regelnutzung |
+| `RETENTION_BLOCKED_DAYS` | | `90` | Aufbewahrung der stündlich verdichteten abgelehnten Verbindungen |
+| `RDNS_ENABLED` | | `true` | Hostnamen der IPs aus den Logs per Reverse-DNS lernen |
+| `RDNS_PRIVATE_ONLY` | | `true` | Nur interne IPs nachschlagen (keine externen DNS-Anfragen) |
 
 Firewalls, Zugangsdaten und Abruf-Intervalle pflegst du in der Oberfläche unter **Firewalls verwalten**.
 
@@ -277,6 +287,7 @@ erfordern eine Anmeldung.
 | Keine Regelnutzung / „nie genutzt“ | *Log firewall traffic* in den Regeln aktivieren und prüfen, ob Syslog ankommt (Status „Syslog“ in der Übersicht) |
 | Bei Änderungen steht „Benutzer unbekannt“ | Log-Kategorie **Admin events** am Syslog-Server aktivieren. Der Änderungen-Tab zeigt einen Hinweis, wenn keine Admin-Events ankommen. |
 | SNMP liefert keine Werte | SNMP in *Device access* für die Zone des Servers erlauben, Protokolle und Passwörter des v3-Benutzers prüfen |
+| Keine Hostnamen in Suche/Anzeige | Der Collector nutzt den DNS-Server des Docker-Hosts. Löst dieser interne Namen nicht auf, im Compose-File beim Dienst `collector` und `api` `dns:` mit dem internen DNS-Server setzen. |
 | Neue Funktionen fehlen nach einem Update | Images neu bauen (`--build` bzw. *Re-build* in Portainer) und den Browser-Cache leeren |
 
 ---

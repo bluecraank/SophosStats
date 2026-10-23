@@ -15,6 +15,10 @@ x-backend: &backend
     RETENTION_METRICS_DAYS: ${RETENTION_METRICS_DAYS:-90}
     RETENTION_LOGS_DAYS: ${RETENTION_LOGS_DAYS:-30}
     RETENTION_RULE_USAGE_DAYS: ${RETENTION_RULE_USAGE_DAYS:-400}
+    RETENTION_BLOCKED_DAYS: ${RETENTION_BLOCKED_DAYS:-90}
+    # Hostnamen per Reverse-DNS lernen (nutzt den DNS des Docker-Hosts; abweichend per "dns:" am Dienst setzen)
+    RDNS_ENABLED: ${RDNS_ENABLED:-true}
+    RDNS_PRIVATE_ONLY: ${RDNS_PRIVATE_ONLY:-true}
   depends_on:
     db:
       condition: service_healthy

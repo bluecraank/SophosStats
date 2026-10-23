@@ -1,15 +1,14 @@
 """Fehlersuche: Würde eine Verbindung (Quelle, Ziel/Website, Dienst) über alle beteiligten Firewalls
 erlaubt? Simuliert das Regelwerk jeder Firewall auf dem Weg und gleicht mit den Logs ab."""
 
-import asyncio
 import ipaddress
-import socket
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.api.crosssite import load_sites, trace
+from app.api.hosts import resolve_name
 from app.models import ConfigObject
 from app.security import DB, CurrentUser
 from app.services.crosssite import detect_link_zone
@@ -31,21 +30,19 @@ _ENTITIES = [
 ]
 
 
-async def _resolve(target: str) -> tuple[str, str | None, list[str]]:
-    """IP oder Hostname -> (IP für die Prüfung, FQDN oder None, alle aufgelösten IPs)."""
+async def _resolve(db: DB, target: str, what: str) -> tuple[str, str | None, list[str]]:
+    """IP oder Hostname -> (IP für die Prüfung, Hostname oder None, alle IPs). Hostnamen zuerst aus den
+    gelernten Namen und Firewall-Objekten (interne Kurznamen wie "EDV-PC01"), sonst per DNS."""
     try:
         return str(ipaddress.ip_address(target)), None, [target]
     except ValueError:
         pass
     host = target.removeprefix("https://").removeprefix("http://").split("/")[0].split(":")[0].strip().lower()
     if not host or " " in host:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ziel muss eine IP-Adresse oder ein Hostname sein")
-    loop = asyncio.get_running_loop()
-    try:
-        infos = await asyncio.wait_for(loop.getaddrinfo(host, None, type=socket.SOCK_STREAM), 4)
-    except (OSError, TimeoutError) as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"„{host}“ konnte nicht aufgelöst werden") from exc
-    ips = sorted({i[4][0] for i in infos}, key=lambda a: (":" in a, a))  # IPv4 zuerst
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{what} muss eine IP-Adresse oder ein Hostname sein")
+    ips = await resolve_name(db, host)
+    if not ips:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"„{host}“ konnte nicht aufgelöst werden")
     return ips[0], host, ips
 
 
@@ -75,11 +72,8 @@ async def troubleshoot(
     destination: Annotated[str, Query(max_length=255)],
     service: Annotated[str, Query(max_length=64)],
 ) -> dict:
-    try:
-        src_ip = str(ipaddress.ip_address(source.strip()))
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Quelle muss eine IP-Adresse sein") from exc
-    dst_ip, fqdn, resolved = await _resolve(destination.strip())
+    src_ip, src_name, _ = await _resolve(db, source.strip(), "Quelle")
+    dst_ip, fqdn, resolved = await _resolve(db, destination.strip(), "Ziel")
 
     firewalls, sites, _ = await load_sites(db)
     names = {fw.id: fw.name for fw in firewalls}
@@ -136,6 +130,8 @@ async def troubleshoot(
         s_fw, d_fw = src_loc[0], dst_loc[0]
         hops.append((s_fw, _zone_of(src_loc), link[s_fw][0], f"Ausgang Richtung {names[d_fw]}"))
         hops.append((d_fw, link[d_fw][0], _zone_of(dst_loc), f"Eingang von {names[s_fw]}"))
+    if src_name:
+        notes.append(f"Quelle {src_name} aufgelöst zu {src_ip}.")
     if fqdn:
         notes.append(f"{fqdn} aufgelöst zu {', '.join(resolved)} (DNS des SophosStats-Servers) – geprüft mit {dst_ip}.")
         notes.append("Web-Filter, Anwendungskontrolle und IPS werden nicht simuliert, nur die Firewall-Regeln.")

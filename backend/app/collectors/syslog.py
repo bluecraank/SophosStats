@@ -34,7 +34,8 @@ class RawMessage:
 
 
 class SyslogServer:
-    def __init__(self) -> None:
+    def __init__(self, resolver=None) -> None:
+        self.resolver = resolver
         self.settings = get_settings()
         self.queue: asyncio.Queue[RawMessage] = asyncio.Queue(maxsize=100_000)
         self.dropped_full = 0
@@ -202,6 +203,8 @@ class SyslogServer:
                 )
 
             src_ip = parsed.get("src_ip")
+            if self.resolver:
+                self.resolver.observe(src_ip, parsed.get("dst_ip"))
             if parsed.log_type == "Firewall" and parsed.is_denied and src_ip:
                 hour = parsed.time.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
                 key = (

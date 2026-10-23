@@ -243,6 +243,17 @@ class RuleLastSeen(Base):
     last_seen: Mapped[datetime] = _ts()
 
 
+class HostName(Base):
+    """Per Reverse-DNS gelernte Hostnamen der in den Logs gesehenen IPs (hostname NULL = kein PTR-Eintrag;
+    wird trotzdem gespeichert, damit nicht ständig neu nachgefragt wird)."""
+
+    __tablename__ = "host_names"
+
+    ip: Mapped[str] = mapped_column(String(64), primary_key=True)
+    hostname: Mapped[str | None] = mapped_column(String(255))
+    resolved_at: Mapped[datetime] = _ts()
+
+
 class BlockedFlowHourly(Base):
     """Abgelehnte Verbindungen pro Stunde verdichtet (beim Empfang gezählt). Bericht und standortübergreifende
     Auswertung lesen hieraus statt Millionen Logzeilen zu gruppieren. Leere Felder als ''/0, da Teil des Schlüssels."""

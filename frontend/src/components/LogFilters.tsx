@@ -24,12 +24,15 @@ export interface LogFilterValue {
   field: string;
   op: FilterOp;
   value: string;
+  /** Anzeige im Chip, z.B. Hostname zur IP – vom Backend ignoriert */
+  label?: string;
 }
 
 type Kind = "ip" | "number" | "text";
 
 /** Bekannte Spalten – alles andere wird als Rohfeld des SFOS-Logs gefiltert. */
 export const FIELDS: Record<string, { label: string; kind: Kind }> = {
+  host_ip: { label: "IP (Quelle oder Ziel)", kind: "ip" },
   src_ip: { label: "Quell-IP", kind: "ip" },
   dst_ip: { label: "Ziel-IP", kind: "ip" },
   src_port: { label: "Quell-Port", kind: "number" },
@@ -98,7 +101,11 @@ export function FilterChip({ f, onRemove, onToggle }: { f: LogFilterValue; onRem
       >
         {OP_LABEL[f.op]}
       </button>
-      {!NO_VALUE.includes(f.op) && <span className="max-w-48 truncate font-mono">{f.value}</span>}
+      {!NO_VALUE.includes(f.op) && (
+        <span className="max-w-56 truncate font-mono" title={f.value}>
+          {f.label ? <>{f.label} <span className="text-muted-foreground">({f.value})</span></> : f.value}
+        </span>
+      )}
       <button type="button" onClick={onRemove} className="rounded p-0.5 hover:bg-background/60" aria-label="Filter entfernen">
         <X className="size-3" />
       </button>

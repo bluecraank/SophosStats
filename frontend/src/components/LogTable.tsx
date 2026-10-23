@@ -3,12 +3,12 @@ import { ChevronRight, Equal, EqualNot, Loader2, Radio, RefreshCw, Route, Search
 import { Fragment, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { fmtBytes, fmtDate } from "@/lib/format";
 import type { Firewall, LogItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { HostInput, useHostNames } from "./HostInput";
 import { AddFilter, FIELDS, FilterChip, NEGATE, RAW_TO_COLUMN, type LogFilterValue } from "./LogFilters";
 import { Empty, ErrorBox, Loading, Pill, RANGES } from "./ui";
 
@@ -168,6 +168,7 @@ export function LogTable({ fixed = {}, firewalls }: { fixed?: LogFilter; firewal
   });
 
   const items = logs.data?.pages.flatMap((p) => p.items) ?? [];
+  const hostNames = useHostNames(items.slice(0, 300).flatMap((l) => [l.src_ip, l.dst_ip]));
   // Feldnamen aus den geladenen Logs als Vorschläge für den Filter-Dialog
   const rawFields = useMemo(() => {
     const keys = new Set<string>();
@@ -187,10 +188,18 @@ export function LogTable({ fixed = {}, firewalls }: { fixed?: LogFilter; firewal
           update({ lq: q.trim() || null });
         }}
       >
-        <div className="relative min-w-64 flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-8" placeholder="Volltext: IP, Benutzer, Regel, Meldung … (Enter)" value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
+        <HostInput
+          className="min-w-64 flex-1"
+          icon={<Search className="pointer-events-none absolute top-1/2 left-2.5 z-10 size-4 -translate-y-1/2 text-muted-foreground" />}
+          placeholder="Hostname (z.B. EDV-), IP, Benutzer, Regel, Text … (Enter)"
+          value={q}
+          onChange={setQ}
+          onPick={(s) => {
+            // Bekannter Host gewählt: als IP-Filter (Quelle oder Ziel) statt Textsuche
+            setQ("");
+            addFilter({ field: "host_ip", op: "eq", value: s.ip, label: s.hostname });
+          }}
+        />
         {showFw && (
           <Select value={firewallId ? String(firewallId) : "all"} onValueChange={(v) => update({ fw: v === "all" ? null : v })}>
             <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
@@ -310,6 +319,11 @@ export function LogTable({ fixed = {}, firewalls }: { fixed?: LogFilter; firewal
                       <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">
                         <Filterable field="src_ip" value={l.src_ip} onFilter={addFilter} />
                         {l.src_port ? <span className="text-muted-foreground">:{l.src_port}</span> : null}
+                        {l.src_ip && hostNames[l.src_ip] && (
+                          <div className="max-w-52 truncate font-sans text-[11px] text-muted-foreground" title={hostNames[l.src_ip]}>
+                            {hostNames[l.src_ip]}
+                          </div>
+                        )}
                       </td>
                       <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">
                         <Filterable field="dst_ip" value={l.dst_ip} onFilter={addFilter} />
@@ -317,6 +331,11 @@ export function LogTable({ fixed = {}, firewalls }: { fixed?: LogFilter; firewal
                           <Filterable field="dst_port" value={l.dst_port} onFilter={addFilter} className="text-muted-foreground">:{l.dst_port}</Filterable>
                         ) : null}{" "}
                         {l.protocol && <span className="text-muted-foreground/70">{l.protocol}</span>}
+                        {l.dst_ip && hostNames[l.dst_ip] && (
+                          <div className="max-w-52 truncate font-sans text-[11px] text-muted-foreground" title={hostNames[l.dst_ip]}>
+                            {hostNames[l.dst_ip]}
+                          </div>
+                        )}
                       </td>
                       <td className="max-w-40 truncate px-3 py-2">
                         <Filterable field="user_name" value={l.user_name} onFilter={addFilter} />

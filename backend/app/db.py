@@ -116,6 +116,11 @@ _MIGRATIONS: list[tuple[str, str]] = [
         "AND firewall_id IS NOT NULL AND src_ip IS NOT NULL "
         "GROUP BY 1, 2, 3, 4, 5, 6 ON CONFLICT DO NOTHING",
     ),
+    # Präfixsuche "EDV-…" auf Hostnamen
+    (
+        "014_index_host_names",
+        "CREATE INDEX IF NOT EXISTS ix_host_names_prefix ON host_names (lower(hostname) text_pattern_ops)",
+    ),
     # Abgelehnte Verbindungen (Standortübergreifend, Bericht) ohne Scan über alle Logs finden
     (
         "009_index_log_denied",

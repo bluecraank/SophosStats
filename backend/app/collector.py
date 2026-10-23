@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from app.collectors import poller
+from app.collectors.rdns import HostResolver
 from app.collectors.syslog import SyslogServer
 from app.config import get_settings
 from app.db import SessionLocal, init_schema
@@ -88,12 +89,15 @@ async def main() -> None:
         except NotImplementedError:  # Windows
             pass
 
-    syslog = SyslogServer()
+    resolver = HostResolver()
+    syslog = SyslogServer(resolver)
     await syslog.start()
     writer = asyncio.create_task(syslog.run_writer(), name="syslog-writer")
+    rdns = asyncio.create_task(resolver.run(stop), name="rdns")
     log.info("Collector gestartet")
     await Scheduler().run(stop)
     writer.cancel()
+    rdns.cancel()
 
 
 if __name__ == "__main__":

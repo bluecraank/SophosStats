@@ -20,6 +20,7 @@ import { Card, Empty, ErrorBox, Loading, PageHeader, Pill, RANGES } from "@/comp
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { HostInput } from "@/components/HostInput";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
@@ -367,9 +368,9 @@ export function CrossSitePage() {
       />
       <Card title="Pfad verfolgen" icon={Route}>
         <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
-          <Input className="w-44 font-mono" placeholder="Quell-IP" value={form.src} onChange={(e) => setForm({ ...form, src: e.target.value })} required />
+          <HostInput className="w-52" placeholder="Quell-IP oder Hostname" value={form.src} onChange={(v) => setForm({ ...form, src: v })} onPick={(h) => setForm({ ...form, src: h.ip })} required />
           <ArrowRight className="mb-2.5 size-4 text-muted-foreground" />
-          <Input className="w-44 font-mono" placeholder="Ziel-IP" value={form.dst} onChange={(e) => setForm({ ...form, dst: e.target.value })} required />
+          <HostInput className="w-52" placeholder="Ziel-IP oder Hostname" value={form.dst} onChange={(v) => setForm({ ...form, dst: v })} onPick={(h) => setForm({ ...form, dst: h.ip })} required />
           <Input className="w-28 font-mono" placeholder="Port" inputMode="numeric" value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value.replace(/\D/g, "") })} />
           <Select value={form.proto || "any"} onValueChange={(v) => setForm({ ...form, proto: v === "any" ? "" : v })}>
             <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>

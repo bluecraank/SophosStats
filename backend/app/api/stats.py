@@ -9,6 +9,7 @@ from sqlalchemy import and_, func, literal_column, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import distinct_on
 
 from app.api.firewalls import get_firewall
+from app.api.hosts import resolve_name
 from app.models import ConfigObject, Firewall, InterfaceMetric, LogEntry, Metric, RuleLastSeen, RuleUsageHourly
 from app.schemas import FirewallOut
 from app.security import DB, CurrentUser
@@ -347,6 +348,16 @@ def _escape_like(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _looks_like_hostname(q: str) -> bool:
+    if " " in q or len(q) > 253 or q.isdigit():
+        return False
+    try:
+        ipaddress.ip_address(q)
+        return False
+    except ValueError:
+        return any(c.isalpha() for c in q)
+
+
 def _fulltext(q: str):
     """Volltextsuche, die vorhandene Indizes nutzt: IP -> exakt auf Quelle/Ziel, Zahl -> Port/Regel-ID,
     nur echter Text läuft über ILIKE (teuer, da ohne Index)."""
@@ -401,7 +412,13 @@ async def logs(
     if dst_ip:
         conditions.append(LogEntry.dst_ip == dst_ip)
     if q:
-        conditions.append(_fulltext(q.strip()))
+        cond = _fulltext(q.strip())
+        # Sieht der Text wie ein Hostname aus, zusätzlich nach dessen IPs suchen (gelernte Namen, Objekte, DNS)
+        if _looks_like_hostname(q.strip()):
+            ips = await resolve_name(db, q.strip())
+            if ips:
+                cond = or_(cond, LogEntry.src_ip.in_(ips), LogEntry.dst_ip.in_(ips))
+        conditions.append(cond)
     if filters:
         try:
             parsed = _FILTER_LIST.validate_json(filters)

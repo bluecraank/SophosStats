@@ -81,6 +81,10 @@ def fakes(monkeypatch):
     async def trace(*_a, **_k):
         return {"verdict": {"status": "unknown", "text": ""}, "hops": []}
 
+    async def resolve_name(_db, name):
+        return {"edv-pc01": ["10.50.10.21"]}.get(name.lower(), [])
+
+    monkeypatch.setattr(ts, "resolve_name", resolve_name)
     monkeypatch.setattr(ts, "load_sites", load_sites)
     monkeypatch.setattr(ts, "trace", trace)
 
@@ -110,3 +114,9 @@ async def test_invalid_input():
         await call("192.168.99.1", "172.31.1.1", "smb")  # beide Seiten unbekannt
     with pytest.raises(HTTPException):
         await call("10.50.10.5", "10.60.10.1", "quatsch")
+
+
+async def test_hostname_as_source():
+    r = await call("EDV-PC01", "10.60.10.1", "smb")
+    assert r["query"]["source"] == "10.50.10.21"
+    assert any("EDV-PC01" in n or "edv-pc01" in n for n in r["notes"])

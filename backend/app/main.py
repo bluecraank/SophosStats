@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, text
 
-from app.api import auth, compliance, crosssite, firewalls, graph, stats, troubleshoot, users
+from app.api import auth, compliance, crosssite, firewalls, graph, hosts, stats, troubleshoot, users
 from app.config import get_settings
 from app.db import SessionLocal, init_schema
 from app.models import Role, User
@@ -78,6 +78,7 @@ for r in (
     graph.router,
     crosssite.router,
     troubleshoot.router,
+    hosts.router,
 ):
     app.include_router(r)
 

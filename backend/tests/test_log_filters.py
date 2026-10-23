@@ -54,3 +54,11 @@ def test_invalid_field_name_rejected():
         LogFilter(field="x; DROP TABLE users", op="eq", value="1")
     with pytest.raises(ValidationError):
         LogFilter(field="src_ip", op="like", value="1")
+
+
+def test_host_ip_matches_source_or_destination():
+    s = sql("host_ip", "eq", "10.50.10.21")
+    assert "log_entries.src_ip ILIKE '10.50.10.21'" in s and " OR " in s and "dst_ip" in s
+    # ausschließen: weder Quelle noch Ziel
+    n = sql("host_ip", "ne", "10.50.10.21")
+    assert " AND " in n and "NOT" in n

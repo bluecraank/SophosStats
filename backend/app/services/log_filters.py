@@ -10,7 +10,7 @@ import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import BigInteger, case, cast, literal, not_, or_
+from sqlalchemy import BigInteger, and_, case, cast, literal, not_, or_
 from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -51,7 +51,7 @@ class LogFilter(BaseModel):
     @field_validator("field")
     @classmethod
     def _known_or_raw(cls, v: str) -> str:
-        if v in TEXT_COLUMNS or v in NUMERIC_COLUMNS or _RAW_FIELD.match(v):
+        if v in TEXT_COLUMNS or v in NUMERIC_COLUMNS or v == "host_ip" or _RAW_FIELD.match(v):
             return v
         raise ValueError("ungültiger Feldname")
 
@@ -69,7 +69,15 @@ def _as_inet(expr):
     return case((expr.op("~")(literal(_IP_TEXT)), cast(expr, INET)), else_=None)
 
 
+_NEGATIVE = {"ne", "not_contains", "not_cidr", "missing"}
+
+
 def to_condition(f: LogFilter) -> ColumnElement[bool]:
+    if f.field == "host_ip":
+        # IP als Quelle oder Ziel: positive Bedingung trifft, wenn eine Seite passt; negative, wenn keine passt
+        src = to_condition(LogFilter(field="src_ip", op=f.op, value=f.value))
+        dst = to_condition(LogFilter(field="dst_ip", op=f.op, value=f.value))
+        return and_(src, dst) if f.op in _NEGATIVE else or_(src, dst)
     numeric = f.field in NUMERIC_COLUMNS
     if numeric:
         col = NUMERIC_COLUMNS[f.field]
