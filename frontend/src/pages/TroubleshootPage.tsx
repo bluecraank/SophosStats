@@ -10,18 +10,21 @@ import {
   Route,
   SearchCheck,
   Server,
+  ShieldBan,
   Stethoscope,
   type LucideIcon,
 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router";
-import { Card, ErrorBox, Loading, PageHeader, Pill } from "@/components/ui";
+import { Card, ErrorBox, Loading, PageHeader, Pill, RANGES } from "@/components/ui";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { HostInput } from "@/components/HostInput";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
+import { fmtDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 type Result = "yes" | "no" | "unknown";
@@ -100,7 +103,41 @@ interface ReachResponse {
   verdict: Verdict;
   notes: string[];
 }
-type Answer = Response | ReachResponse;
+interface BlockedItem {
+  firewall_id: number;
+  firewall: string;
+  target: string;
+  detail: string;
+  dst_ip: string | null;
+  dst_port: number | null;
+  protocol: string | null;
+  service: string;
+  rule_name: string | null;
+  user_name: string | null;
+  log_type: string | null;
+  hits: number;
+  last_seen: string | null;
+}
+interface BlockedCategory {
+  key: string;
+  label: string;
+  total: number;
+  last_seen: string | null;
+  log_types: string[];
+  firewalls: { firewall_id: number; name: string; hits: number }[];
+  items: BlockedItem[];
+  more: number;
+}
+interface BlockedResponse {
+  mode: "blocked";
+  query: { given: string; ip: string; name: string | null; resolved: string[]; hours: number };
+  anchor: Loc | null;
+  total: number;
+  categories: BlockedCategory[];
+  verdict: Verdict;
+  notes: string[];
+}
+type Answer = Response | ReachResponse | BlockedResponse;
 
 const DECISION: Record<Hop["decision"], { label: string; icon: LucideIcon; cls: string; border: string }> = {
   allow: { label: "erlaubt", icon: CircleCheck, cls: "border-good/40 bg-good/10 text-good", border: "border-good/50" },
@@ -115,6 +152,11 @@ const VERDICT = {
 const REACH_TITLE = {
   allow: "Erlaubende Regeln gefunden",
   deny: "Keine erlaubende Regel",
+  unknown: "Nicht eindeutig bestimmbar",
+};
+const BLOCKED_TITLE = {
+  allow: "Nichts blockiert",
+  deny: "Blockierungen gefunden",
   unknown: "Nicht eindeutig bestimmbar",
 };
 const MARK: Record<Result, { icon: LucideIcon; cls: string }> = {
@@ -333,7 +375,113 @@ function ReachResult({ r }: { r: ReachResponse }) {
   );
 }
 
-function Result({ p }: { p: { source: string; destination: string; service: string } }) {
+/** Link in die Log-Ansicht mit vorbelegten Filtern. */
+function logsUrl(ip: string, hours: number, logType?: string) {
+  const filters = [{ field: "src_ip", op: "eq", value: ip }, ...(logType ? [{ field: "log_type", op: "eq", value: logType }] : [])];
+  return `/logs?${new URLSearchParams({ lf: JSON.stringify(filters), ...(hours !== 24 ? { lh: String(hours) } : {}) })}`;
+}
+
+/** Was wurde für die Quelle blockiert? Logs aller Module, nach Kategorie gruppiert. */
+function BlockedResult({ r }: { r: BlockedResponse }) {
+  const v = VERDICT[r.verdict.status];
+  const ip = r.query.ip;
+  return (
+    <div className="space-y-4">
+      <Alert className={v.cls}>
+        <v.icon />
+        <AlertTitle>{BLOCKED_TITLE[r.verdict.status]}</AlertTitle>
+        <AlertDescription>{r.verdict.text}</AlertDescription>
+      </Alert>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Endpoint label="Quelle" value={r.query.name ?? ip} loc={r.anchor} icon={Monitor} />
+        <div className="flex flex-wrap gap-2">
+          {r.categories.map((c) => (
+            <a key={c.key} href={`#blocked-${c.key}`} className="rounded-lg border bg-card px-3 py-2 text-sm hover:bg-muted">
+              <span className="text-muted-foreground">{c.label}</span> <strong>{c.total.toLocaleString("de-DE")}</strong>
+            </a>
+          ))}
+        </div>
+        <Button variant="link" size="sm" className="ml-auto h-auto p-0" asChild>
+          <Link to={logsUrl(ip, r.query.hours)}>Alle Logs dieser Quelle</Link>
+        </Button>
+      </div>
+
+      {r.notes.length > 0 && (
+        <ul className="space-y-1 text-xs text-muted-foreground">
+          {r.notes.map((n) => (
+            <li key={n} className="flex gap-2"><Info className="mt-0.5 size-3.5 shrink-0" />{n}</li>
+          ))}
+        </ul>
+      )}
+
+      {r.categories.map((c) => (
+        <div key={c.key} id={`blocked-${c.key}`}>
+          <Card
+            title={
+              <>
+                {c.label} <span className="font-normal text-muted-foreground">· {c.total.toLocaleString("de-DE")} Blockierungen</span>
+              </>
+            }
+            icon={ShieldBan}
+            actions={
+              <Button variant="link" size="sm" className="h-auto p-0" asChild>
+                <Link to={logsUrl(ip, r.query.hours, c.log_types[0])}>In den Logs</Link>
+              </Button>
+            }
+          >
+            <div className="space-y-3">
+              {c.firewalls.length > 1 && (
+                <p className="text-xs text-muted-foreground">
+                  {c.firewalls.map((f) => `${f.name}: ${f.hits.toLocaleString("de-DE")}`).join(" · ")}
+                </p>
+              )}
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Firewall</TableHead>
+                      <TableHead>Ziel</TableHead>
+                      <TableHead>Grund</TableHead>
+                      {c.key === "firewall" && <TableHead>Benutzer</TableHead>}
+                      <TableHead className="text-right">Anzahl</TableHead>
+                      <TableHead>Zuletzt</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {c.items.map((it, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="whitespace-nowrap">{it.firewall}</TableCell>
+                        <TableCell className="max-w-72 font-mono text-xs break-all">{it.target}</TableCell>
+                        <TableCell className="max-w-96 text-xs break-words">{it.detail}</TableCell>
+                        {c.key === "firewall" && <TableCell className="text-xs">{it.user_name ?? "–"}</TableCell>}
+                        <TableCell className="text-right tabular-nums">{it.hits.toLocaleString("de-DE")}</TableCell>
+                        <TableCell className="text-xs whitespace-nowrap text-muted-foreground">{it.last_seen ? fmtDate(it.last_seen) : "–"}</TableCell>
+                        <TableCell>
+                          {c.key === "firewall" && it.dst_ip && it.service && (
+                            <Button variant="link" size="sm" className="h-auto p-0" asChild>
+                              <Link to={`/troubleshoot?${new URLSearchParams({ source: ip, destination: it.dst_ip, service: it.service })}`}>
+                                Warum?
+                              </Link>
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {c.more > 0 && <p className="text-xs text-muted-foreground">… und {c.more} weitere Einträge – siehe Logs.</p>}
+            </div>
+          </Card>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Result({ p }: { p: { source: string; destination: string; service: string; hours: string } }) {
   const q = useQuery({
     queryKey: ["troubleshoot", p],
     queryFn: () => api<Answer>("/api/troubleshoot", { params: p }),
@@ -342,6 +490,7 @@ function Result({ p }: { p: { source: string; destination: string; service: stri
   if (q.isPending) return <Loading />;
   if (q.error) return <ErrorBox error={q.error} />;
   if (q.data.mode === "reach") return <ReachResult r={q.data} />;
+  if (q.data.mode === "blocked") return <BlockedResult r={q.data} />;
   const r = q.data;
   const v = VERDICT[r.verdict.status];
   const traceUrl = `/cross-site?${new URLSearchParams({
@@ -400,19 +549,35 @@ const EXAMPLES = [
   { source: "10.50.10.5", destination: "10.60.10.1", service: "smb" },
   { source: "10.50.10.5", destination: "www.example.com", service: "https" },
   { source: "", destination: "10.60.10.1", service: "" },
+  { source: "10.50.10.5", destination: "", service: "" },
 ];
+
+function exampleLabel(ex: (typeof EXAMPLES)[number]) {
+  if (!ex.source) return `Wer erreicht ${ex.destination}?`;
+  if (!ex.destination) return `Was wird für ${ex.source} blockiert?`;
+  return `${ex.source} → ${ex.destination} (${ex.service})`;
+}
 
 export function TroubleshootPage() {
   const [params, setParams] = useSearchParams();
-  const current = params.get("destination")
-    ? { source: params.get("source") ?? "", destination: params.get("destination")!, service: params.get("service") ?? "" }
+  const current = params.get("destination") || params.get("source")
+    ? {
+        source: params.get("source") ?? "",
+        destination: params.get("destination") ?? "",
+        service: params.get("service") ?? "",
+        hours: params.get("hours") ?? "24",
+      }
     : null;
-  const [form, setForm] = useState(current ?? { source: "", destination: "", service: "" });
+  const [form, setForm] = useState(current ?? { source: "", destination: "", service: "", hours: "24" });
+  const blockedMode = !form.destination.trim();
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const next: Record<string, string> = { destination: form.destination.trim() };
+    const next: Record<string, string> = {};
     if (form.source.trim()) next.source = form.source.trim();
+    if (form.destination.trim()) next.destination = form.destination.trim();
     if (form.service.trim()) next.service = form.service.trim();
+    if (blockedMode && form.hours !== "24") next.hours = form.hours;
+    if (!next.source && !next.destination) return;
     setParams(next);
   };
 
@@ -425,29 +590,42 @@ export function TroubleshootPage() {
       <Card title="Verbindung prüfen" icon={Stethoscope} className="overflow-visible">
         <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
           <label className="space-y-1">
-            <span className="label">Quelle (IP oder Hostname, optional)</span>
-            <HostInput className="w-56" placeholder="10.50.10.5 oder EDV-" value={form.source} onChange={(v) => setForm({ ...form, source: v })} onPick={(h) => setForm({ ...form, source: h.ip })} />
+            <span className="label">Quelle (IP oder Hostname)</span>
+            <HostInput className="w-56" placeholder="10.50.10.5 oder EDV-" value={form.source} onChange={(v) => setForm({ ...form, source: v })} onPick={(h) => setForm({ ...form, source: h.ip })} required={!form.destination.trim()} />
           </label>
           <ArrowRight className="mb-2.5 size-4 text-muted-foreground" />
           <label className="space-y-1">
             <span className="label">Ziel (IP oder Website)</span>
-            <HostInput className="w-64" placeholder="10.60.10.1, Hostname oder Website" value={form.destination} onChange={(v) => setForm({ ...form, destination: v })} onPick={(h) => setForm({ ...form, destination: h.ip })} required />
+            <HostInput className="w-64" placeholder="10.60.10.1, Hostname oder Website" value={form.destination} onChange={(v) => setForm({ ...form, destination: v })} onPick={(h) => setForm({ ...form, destination: h.ip })} required={!form.source.trim()} />
           </label>
-          <label className="space-y-1">
-            <span className="label">Dienst{form.source.trim() ? "" : " (optional)"}</span>
-            <Input className="w-44 font-mono" placeholder="https, 443, tcp/3389, ping" value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value })} required={!!form.source.trim()} />
-          </label>
+          {blockedMode ? (
+            <label className="space-y-1">
+              <span className="label">Zeitraum</span>
+              <Select value={form.hours} onValueChange={(v) => setForm({ ...form, hours: v })}>
+                <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {RANGES.map((r) => <SelectItem key={r.hours} value={String(r.hours)}>Letzte {r.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </label>
+          ) : (
+            <label className="space-y-1">
+              <span className="label">Dienst{form.source.trim() ? "" : " (optional)"}</span>
+              <Input className="w-44 font-mono" placeholder="https, 443, tcp/3389, ping" value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value })} required={!!form.source.trim()} />
+            </label>
+          )}
           <Button><SearchCheck /> Prüfen</Button>
         </form>
         <p className="mt-2 text-xs text-muted-foreground">
-          Ohne Quelle wird gezeigt, welche Regeln auf allen Firewalls das Ziel enthalten – also wer es erreichen kann.
+          Quelle und Ziel: Verbindung über die Regelwerke prüfen. Nur Ziel: wer erreicht es laut Regeln? Nur Quelle: was
+          wurde für sie laut Logs blockiert – Firewall, Web-Filter, Anwendungskontrolle, IPS und weitere Module.
         </p>
         {!current && (
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             Beispiele:
             {EXAMPLES.map((ex) => (
-              <button key={`${ex.source}>${ex.destination}`} type="button" className="rounded border px-2 py-0.5 font-mono hover:bg-muted" onClick={() => setForm(ex)}>
-                {ex.source ? `${ex.source} → ${ex.destination} (${ex.service})` : `Wer erreicht ${ex.destination}?`}
+              <button key={`${ex.source}>${ex.destination}`} type="button" className="rounded border px-2 py-0.5 font-mono hover:bg-muted" onClick={() => setForm({ ...ex, hours: "24" })}>
+                {exampleLabel(ex)}
               </button>
             ))}
           </div>

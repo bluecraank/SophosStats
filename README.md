@@ -80,6 +80,8 @@ blockierter Verbindungen über mehrere Standorte.
   den Dienst“), dazu den Abgleich mit den Logs der letzten 24 h
 - Nur Ziel eingeben („Wer erreicht 10.60.10.1?“): listet auf allen Firewalls die Regeln, die dieses Ziel enthalten,
   mit Quell-Zonen, Quell-Netzen und Diensten – optional auf einen Dienst eingeschränkt
+- Nur Quelle eingeben („Was wird für 10.50.10.5 blockiert?“): wertet die Logs aller Module aus – Firewall-Regeln,
+  Web-Filter, Anwendungskontrolle, IPS, ATP, Virenschutz – gruppiert nach Ziel bzw. Grund, mit Sprung zur Regelprüfung
 
 **Standortübergreifend**
 - Verfolgt eine Verbindung über mehrere Firewalls, z. B. Standort A → WireGuard → Standort B, und zeigt: *„Auf FW-A erlaubt, auf FW-B blockiert → Regel fehlt auf FW-B“*

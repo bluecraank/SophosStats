@@ -2,18 +2,21 @@
 erlaubt? Simuliert das Regelwerk jeder Firewall auf dem Weg und gleicht mit den Logs ab.
 
 Ohne Quelle wird stattdessen gesucht, welche Regeln auf allen Firewalls dieses Ziel enthalten:
-"Wer erreicht 1.2.3.4?"."""
+"Wer erreicht 1.2.3.4?". Ohne Ziel zeigen die Logs, was für die Quelle blockiert wurde – über alle
+Module (Firewall, Web-Filter, Anwendungskontrolle, IPS …)."""
 
 import ipaddress
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from app.api.crosssite import load_sites, trace
 from app.api.hosts import resolve_name
-from app.models import ConfigObject
+from app.api.stats import Hours, _since
+from app.models import ConfigObject, LogEntry
 from app.security import DB, CurrentUser
+from app.services.blocked import BLOCK_STATUS, BLOCK_SUBTYPES, group_blocked
 from app.services.crosssite import detect_link_zone
 from app.services.policy_sim import ANY_SERVICE, Objects, Service, evaluate, match_destination, parse_service
 from app.services.rules import summarize_rule
@@ -115,15 +118,21 @@ async def _load(db: DB) -> _Config:
 async def troubleshoot(
     db: DB,
     user: CurrentUser,
-    destination: Annotated[str, Query(max_length=255)],
     source: Annotated[str | None, Query(max_length=64)] = None,
+    destination: Annotated[str | None, Query(max_length=255)] = None,
     service: Annotated[str | None, Query(max_length=64)] = None,
+    hours: Hours = 24,
 ) -> dict:
     source = (source or "").strip()
-    destination = destination.strip()
+    destination = (destination or "").strip()
     service = (service or "").strip()
+    if not source and not destination:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Quelle oder Ziel angeben")
     if not destination:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ziel angeben")
+        # Nur Quelle: was wurde für sie laut Logs blockiert?
+        ip, name, resolved = await _resolve(db, source, "Quelle")
+        firewalls, sites, _ = await load_sites(db)
+        return await _blocked(db, firewalls, sites, source, ip, name, resolved, hours)
     cfg = await _load(db)
     if service:
         try:
@@ -139,6 +148,96 @@ async def troubleshoot(
         return await _path(db, user, cfg, source, destination, svc)
     ip, name, resolved = await _resolve(db, destination, "Ziel")
     return _reach(cfg, destination, ip, name, resolved, svc)
+
+
+_SAMPLE = 5000  # jüngste blockierende Logzeilen, aus denen die Einträge je Kategorie verdichtet werden
+
+
+async def _blocked(
+    db: DB,
+    firewalls: list,
+    sites: dict[int, list[dict]],
+    given: str,
+    ip: str,
+    name: str | None,
+    resolved: list[str],
+    hours: int,
+) -> dict:
+    """Blockierungen für eine Quelle aus den Logs – alle Module, nach Kategorie gruppiert."""
+    names = {fw.id: fw.name for fw in firewalls}
+    since = _since(hours)
+    blocked = or_(
+        func.lower(LogEntry.log_subtype).in_(sorted(BLOCK_SUBTYPES)),
+        func.lower(LogEntry.status).in_(sorted(BLOCK_STATUS)),
+    )
+    where = (LogEntry.src_ip == ip, LogEntry.time >= since, blocked)
+    counts = (
+        await db.execute(
+            select(
+                LogEntry.firewall_id,
+                LogEntry.log_type,
+                LogEntry.log_component,
+                LogEntry.log_subtype,
+                func.count().label("n"),
+                func.max(LogEntry.time).label("last"),
+            )
+            .where(*where)
+            .group_by(LogEntry.firewall_id, LogEntry.log_type, LogEntry.log_component, LogEntry.log_subtype)
+        )
+    ).all()
+    cols = (
+        LogEntry.time,
+        LogEntry.firewall_id,
+        LogEntry.log_type,
+        LogEntry.log_component,
+        LogEntry.log_subtype,
+        LogEntry.status,
+        LogEntry.rule_name,
+        LogEntry.dst_ip,
+        LogEntry.dst_port,
+        LogEntry.protocol,
+        LogEntry.user_name,
+        LogEntry.message,
+        LogEntry.fields,
+    )
+    sample = (await db.execute(select(*cols).where(*where).order_by(LogEntry.time.desc()).limit(_SAMPLE))).all()
+    rows = [dict(zip([c.key for c in cols], r, strict=True)) for r in sample]
+    categories = group_blocked(rows, [tuple(c) for c in counts], names)
+    total = sum(c["total"] for c in categories)
+
+    loc = _locate(sites, ip)
+    notes: list[str] = []
+    if name:
+        notes.append(f"{name} aufgelöst zu {', '.join(resolved)} – ausgewertet für {ip}.")
+    if total > _SAMPLE:
+        notes.append(
+            f"Die Einträge je Kategorie stammen aus den jüngsten {_SAMPLE} blockierenden Logzeilen, "
+            "die Gesamtzahlen sind vollständig."
+        )
+    notes.append(
+        "Grundlage sind die per Syslog empfangenen Logs. Module ohne Protokollierung (z.B. Regeln ohne Logging) "
+        "tauchen hier nicht auf."
+    )
+    span = f"{hours} h" if hours < 48 else f"{hours // 24} Tagen"
+    who = name or ip
+    if total == 0:
+        verdict = {"status": "allow", "text": f"In den letzten {span} wurde für {who} nichts blockiert."}
+    else:
+        parts = ", ".join(f"{c['label']} {c['total']}" for c in categories)
+        verdict = {"status": "deny", "text": f"{total} Blockierungen in den letzten {span} für {who}: {parts}."}
+    return {
+        "mode": "blocked",
+        "query": {"given": given, "ip": ip, "name": name, "resolved": resolved, "hours": hours},
+        "anchor": (
+            {"firewall_id": loc[0], "name": names[loc[0]], "cidr": loc[1]["cidr"], "zone": loc[1].get("zone")}
+            if loc
+            else None
+        ),
+        "total": total,
+        "categories": categories,
+        "verdict": verdict,
+        "notes": notes,
+    }
 
 
 def _reach(cfg: _Config, given: str, ip: str, name: str | None, resolved: list[str], svc: Service) -> dict:
