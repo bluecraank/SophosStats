@@ -182,8 +182,11 @@ async def init_schema() -> None:
             await conn.execute(
                 text(f"SELECT add_retention_policy('{table}', INTERVAL '{int(days)} days', if_not_exists => TRUE)")
             )
+            if table == "log_entries":
+                # Tägliche Partitionen: frühe Kompression und schnelles Löschen ganzer Tage (gilt für neue Chunks)
+                await conn.execute(text("SELECT set_chunk_time_interval('log_entries', INTERVAL '1 day')"))
             # Kompression lässt sich nicht neu setzen, wenn schon komprimierte Chunks existieren –
-            # Savepoint, damit ein Fehler hier nicht die ganze Transaktion abbricht
+            # Savepoints, damit ein Fehler hier nicht die ganze Transaktion abbricht
             try:
                 async with conn.begin_nested():
                     await conn.execute(
@@ -192,8 +195,14 @@ async def init_schema() -> None:
                             f"timescaledb.compress_segmentby = '{segment_by}')"
                         )
                     )
+            except Exception as exc:  # noqa: BLE001
+                log.info("Kompressions-Einstellung für %s unverändert: %s", table, exc)
+            compress_after = settings.compress_logs_after_days if table == "log_entries" else 7
+            try:
+                async with conn.begin_nested():
+                    await conn.execute(text(f"SELECT remove_compression_policy('{table}', if_exists => TRUE)"))
                     await conn.execute(
-                        text(f"SELECT add_compression_policy('{table}', INTERVAL '7 days', if_not_exists => TRUE)")
+                        text(f"SELECT add_compression_policy('{table}', INTERVAL '{int(compress_after)} days')")
                     )
             except Exception as exc:  # noqa: BLE001
-                log.info("Kompression für %s unverändert: %s", table, exc)
+                log.info("Kompressions-Richtlinie für %s unverändert: %s", table, exc)

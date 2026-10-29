@@ -165,30 +165,32 @@ class SyslogServer:
                     log.warning("Syslog von unbekannter Quelle %s verworfen", msg.source_ip)
                 continue
             last_seen[fw_id] = max(last_seen.get(fw_id, parsed.time), parsed.time)
-            rows.append(
-                {
-                    "time": parsed.time,
-                    "firewall_id": fw_id,
-                    "source_ip": msg.source_ip,
-                    "log_type": parsed.log_type,
-                    "log_component": parsed.get("log_component"),
-                    "log_subtype": parsed.get("log_subtype"),
-                    "status": parsed.get("status"),
-                    "severity": parsed.get("priority", "severity"),
-                    "rule_id": parsed.rule_id,
-                    "rule_name": parsed.rule_name,
-                    "src_ip": parsed.get("src_ip"),
-                    "src_port": parsed.get_int("src_port"),
-                    "dst_ip": parsed.get("dst_ip"),
-                    "dst_port": parsed.get_int("dst_port"),
-                    "protocol": parsed.get("protocol"),
-                    "user_name": parsed.get("user_name", "user"),
-                    "sent_bytes": parsed.sent_bytes,
-                    "recv_bytes": parsed.recv_bytes,
-                    "message": parsed.get("message"),
-                    "fields": parsed.fields,
-                }
-            )
+            store_row = self.settings.log_store_allowed or parsed.log_type != "Firewall" or parsed.is_denied
+            if store_row:
+                rows.append(
+                    {
+                        "time": parsed.time,
+                        "firewall_id": fw_id,
+                        "source_ip": msg.source_ip,
+                        "log_type": parsed.log_type,
+                        "log_component": parsed.get("log_component"),
+                        "log_subtype": parsed.get("log_subtype"),
+                        "status": parsed.get("status"),
+                        "severity": parsed.get("priority", "severity"),
+                        "rule_id": parsed.rule_id,
+                        "rule_name": parsed.rule_name,
+                        "src_ip": parsed.get("src_ip"),
+                        "src_port": parsed.get_int("src_port"),
+                        "dst_ip": parsed.get("dst_ip"),
+                        "dst_port": parsed.get_int("dst_port"),
+                        "protocol": parsed.get("protocol"),
+                        "user_name": parsed.get("user_name", "user"),
+                        "sent_bytes": parsed.sent_bytes,
+                        "recv_bytes": parsed.recv_bytes,
+                        "message": parsed.get("message"),
+                        "fields": sfos_log.extra_fields(parsed.fields),
+                    }
+                )
 
             if parsed.is_admin:
                 admin_rows.append(
@@ -235,10 +237,12 @@ class SyslogServer:
                     agg["sent_pkts"] += parsed.sent_pkts or 0
                     agg["recv_pkts"] += parsed.recv_pkts or 0
 
-        if not rows:
+        # Auch ohne gespeicherte Rohzeilen (LOG_STORE_ALLOWED=false) Nutzung und Blockierungen verbuchen
+        if not (rows or usage or blocked or admin_rows or last_seen):
             return
         async with SessionLocal() as db, db.begin():
-            await db.execute(insert(LogEntry), rows)
+            if rows:
+                await db.execute(insert(LogEntry), rows)
             if admin_rows:
                 await db.execute(insert(AdminEvent), admin_rows)
             if blocked:

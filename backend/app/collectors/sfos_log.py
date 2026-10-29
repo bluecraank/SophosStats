@@ -69,7 +69,7 @@ class ParsedLog:
 
     @property
     def con_event(self) -> str | None:
-        v = self.get("con_event")
+        v = self.get("con_event", "connevent")  # Schreibweise je nach Firmware
         return v.lower() if v else None
 
     @property
@@ -121,6 +121,53 @@ def _parse_time(fields: dict[str, str], received: datetime) -> datetime:
             pass
     # Uhrzeit ohne auflösbare Zeitzone ist mehrdeutig – dann Empfangszeit verwenden
     return received
+
+
+# Felder, die bereits als eigene Spalte gespeichert werden oder in jeder Zeile gleich sind – nicht nochmals
+# im JSON ablegen (bei ~20 Mio. Logzeilen/Tag macht das einen Großteil des Speichers aus)
+_STORED_AS_COLUMN = {
+    "log_type",
+    "log_component",
+    "log_subtype",
+    "status",
+    "priority",
+    "severity",
+    "fw_rule_id",
+    "fw_rule_name",
+    "src_ip",
+    "dst_ip",
+    "src_port",
+    "dst_port",
+    "protocol",
+    "user_name",
+    "sent_bytes",
+    "recv_bytes",
+    "bytes_sent",
+    "bytes_received",
+    "message",
+}
+_CONSTANT = {
+    "device",
+    "device_name",
+    "device_model",
+    "device_id",
+    "device_serial_id",
+    "date",
+    "time",
+    "timezone",
+    "timestamp",
+    "log_version",
+}
+
+
+def extra_fields(fields: dict[str, str]) -> dict[str, str]:
+    """Rohfelder für die JSON-Spalte: ohne Spalten-Duplikate, Gerätekonstanten und leere Werte."""
+    return {
+        k: v
+        for k, v in fields.items()
+        if v not in ("", "0") or k.endswith("_pkts")
+        if k not in _STORED_AS_COLUMN and k not in _CONSTANT
+    }
 
 
 def parse(message: str, received: datetime | None = None) -> ParsedLog | None:

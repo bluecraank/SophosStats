@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     retention_logs_days: int = 30
     retention_rule_usage_days: int = 400
     retention_blocked_days: int = 90
+    # Roh-Logs ab diesem Alter komprimieren (die jüngsten Logs bleiben unkomprimiert und schnell durchsuchbar)
+    compress_logs_after_days: int = 1
+    # False: erlaubte Firewall-Verbindungen nicht einzeln speichern (Regelnutzung/Bytes werden trotzdem
+    # verdichtet erfasst). Spart bei hohem Log-Volumen den Großteil des Speichers.
+    log_store_allowed: bool = True
 
     # Reverse-DNS der in den Logs gesehenen IPs (Hostnamen in Suche und Anzeige)
     rdns_enabled: bool = True

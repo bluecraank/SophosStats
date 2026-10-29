@@ -60,3 +60,12 @@ def test_admin_event_detection():
     assert sfos_log.parse('log_type="Event" log_component="GUI" log_subtype="Admin" message="x"').is_admin
     assert sfos_log.parse('log_type="Event" log_component="API" log_subtype="System"').is_admin
     assert not sfos_log.parse('log_type="Firewall" log_component="Firewall Rule" log_subtype="Allowed"').is_admin
+
+
+def test_connevent_spelling_and_slim_fields():
+    p = sfos_log.parse(
+        'log_type="Firewall" log_subtype="Allowed" fw_rule_id=5 sent_bytes=10 connevent="Stop" '
+        'device_name="XGS" src_ip=10.0.0.1 srczone="LAN" app_name="Teams"'
+    )
+    assert p.con_event == "stop" and p.counts_bytes and not p.counts_as_hit
+    assert sfos_log.extra_fields(p.fields) == {"connevent": "Stop", "srczone": "LAN", "app_name": "Teams"}
