@@ -125,6 +125,9 @@ export function AddFilter({ rawFields, onAdd }: { rawFields: string[]; onAdd: (f
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    // Das Popover liegt im React-Baum innerhalb des Suchformulars: ohne stopPropagation würde dessen
+    // onSubmit ebenfalls feuern und mit veralteten URL-Parametern den gerade gesetzten Filter überschreiben
+    e.stopPropagation();
     if (!effectiveField || (needsValue && !value.trim())) return;
     onAdd({ field: effectiveField, op, value: needsValue ? value.trim() : "" });
     setValue("");

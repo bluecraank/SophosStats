@@ -157,6 +157,7 @@ export function AddRuleFilter({ rules, onAdd }: { rules: Rule[]; onAdd: (f: Rule
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    e.stopPropagation(); // nicht an ein umgebendes Formular weiterreichen
     if (needsValue && !value.trim()) return;
     onAdd({ field, op, value: needsValue ? value.trim() : "" });
     setValue("");
