@@ -1,7 +1,24 @@
+# Wird beim Start per envsubst zu /etc/nginx/conf.d/default.conf (setzt ${HTTPS_PORT} und ${HTTPS_REDIRECT} ein).
+# Die eigentliche Auslieferung (Anwendung, /api-Proxy, Header) steht in /etc/nginx/snippets/sophosstats.conf.
+
+# Schema für das Backend: hinter einem vorgeschalteten Reverse Proxy dessen X-Forwarded-Proto übernehmen
+map $http_x_forwarded_proto $forwarded_proto {
+    ""      $scheme;
+    default $http_x_forwarded_proto;
+}
+
 server {
     listen 80;
     server_name _;
-    return 301 https://$host:${HTTPS_PORT}$request_uri;
+
+    # HTTPS_REDIRECT=false: kein 301 auf HTTPS, Port 80 liefert die Anwendung direkt aus
+    # (TLS übernimmt ein eigener Reverse Proxy davor)
+    set $https_redirect "${HTTPS_REDIRECT}";
+    if ($https_redirect != "false") {
+        return 301 https://$host:${HTTPS_PORT}$request_uri;
+    }
+
+    include /etc/nginx/snippets/sophosstats.conf;
 }
 
 server {
@@ -14,40 +31,5 @@ server {
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_session_cache   shared:SSL:10m;
 
-    server_tokens off;
-    client_max_body_size 1m;
-
-    add_header Strict-Transport-Security "max-age=31536000" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer" always;
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" always;
-
-    root /usr/share/nginx/html;
-
-    location /api/ {
-        proxy_pass http://api:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_read_timeout 60s;
-    }
-
-    location /assets/ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-        add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header X-Content-Type-Options "nosniff" always;
-    }
-
-    location / {
-        try_files $uri /index.html;
-        add_header Cache-Control "no-cache";
-        add_header Strict-Transport-Security "max-age=31536000" always;
-        add_header X-Frame-Options "DENY" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header Referrer-Policy "no-referrer" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" always;
-    }
+    include /etc/nginx/snippets/sophosstats.conf;
 }

@@ -172,8 +172,25 @@ solltest du direkt 2FA einrichten.
 | Port | Zweck |
 |---|---|
 | 443/tcp (`HTTPS_PORT`) | Weboberfläche |
-| 80/tcp (`HTTP_PORT`) | Weiterleitung auf HTTPS |
+| 80/tcp (`HTTP_PORT`) | Weiterleitung auf HTTPS (bzw. die Anwendung selbst bei `HTTPS_REDIRECT=false`) |
 | 5514/udp, 5514/tcp | Syslog von den Firewalls |
+
+**Hinter einem eigenen Reverse Proxy** (nginx, Traefik, Caddy …), der TLS übernimmt und per HTTP weiterreicht:
+`HTTPS_REDIRECT=false` setzen, sonst antwortet der Web-Container auf jede Anfrage mit einer Weiterleitung auf
+`https://…:443`. Den Proxy auf `http://<docker-host>:<HTTP_PORT>` zeigen lassen und die üblichen Header mitgeben,
+z. B. für nginx:
+
+```nginx
+location / {
+    proxy_pass http://<docker-host>:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Port 443 des Containers kann dann unveröffentlicht bleiben (`HTTPS_PORT` auf einen freien Port setzen oder das
+Port-Mapping entfernen).
 
 ---
 
@@ -198,6 +215,7 @@ Alle Einstellungen sind Umgebungsvariablen. Lokal kommen sie aus der `.env`, in 
 | `INITIAL_ADMIN_USERNAME` | | `admin` | Erster Admin, wird nur angelegt, solange es keine Benutzer gibt |
 | `INITIAL_ADMIN_PASSWORD` | beim ersten Start | – | Passwort des ersten Admins |
 | `HTTPS_PORT` / `HTTP_PORT` | | `443` / `80` | Ports auf dem Host, auch für die HTTP→HTTPS-Weiterleitung |
+| `HTTPS_REDIRECT` | | `true` | `false`: keine Weiterleitung auf HTTPS – für den Betrieb hinter einem eigenen Reverse Proxy |
 | `SESSION_TTL_HOURS` | | `12` | Gültigkeit einer Anmeldung |
 | `RETENTION_METRICS_DAYS` | | `90` | Aufbewahrung von CPU/RAM/Interface-Werten |
 | `RETENTION_LOGS_DAYS` | | `30` | Aufbewahrung der Logs |
@@ -287,6 +305,7 @@ erfordern eine Anmeldung.
 | Portainer: *„.env not found“* | Variablen unter *Environment variables* des Stacks setzen, eine `.env`-Datei wird nicht benötigt |
 | Container `db` ist *unhealthy* | `docker logs <db-container>` prüfen. Nach einem fehlgeschlagenen Erst-Start das Volume `db-data` löschen und neu deployen. |
 | HTTP-Weiterleitung landet auf falschem Port | `HTTPS_PORT` auf den tatsächlich genutzten Port setzen |
+| Hinter Reverse Proxy: Weiterleitungsschleife oder Sprung auf `https://…:443` | `HTTPS_REDIRECT=false` setzen und den Web-Container neu starten |
 | *„599 You do not have permission“* | Dem Admin-Profil des API-Benutzers Leserechte für den genannten Bereich geben |
 | Keine Regelnutzung / „nie genutzt“ | *Log firewall traffic* in den Regeln aktivieren und prüfen, ob Syslog ankommt (Status „Syslog“ in der Übersicht) |
 | Bei Änderungen steht „Benutzer unbekannt“ | Log-Kategorie **Admin events** am Syslog-Server aktivieren. Der Änderungen-Tab zeigt einen Hinweis, wenn keine Admin-Events ankommen. |
