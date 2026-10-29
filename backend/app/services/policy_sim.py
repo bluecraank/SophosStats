@@ -179,7 +179,7 @@ class Objects:
         stype = str(data.get("Type", "")).lower()
         details = _as_list(data.get("ServiceDetails"), "ServiceDetail")
         if stype == "icmp" or stype == "icmpv6":
-            return Check("", "yes" if svc.protocol == "ICMP" else "no", name)
+            return Check("", "yes" if svc.protocol in ("ICMP", "ANY") else "no", name)
         if stype in ("ip", "ipprotocol"):
             return Check("", "unknown", f"{name} (IP-Protokoll)")
         for d in details:
@@ -298,6 +298,52 @@ def evaluate(
             near.append({**_rule_ref(rule), "checks": [c.__dict__ for c in checks]})
     decision = "unknown" if possible else "deny"
     return Evaluation(decision, None, [], possible, near[:5])
+
+
+ANY_SERVICE = Service("ANY", None, "alle Dienste")
+
+
+def match_destination(
+    rules: list[dict[str, Any]],
+    objs: Objects,
+    dst: Address,
+    svc: Service,
+    dst_zone: str | None,
+    fqdn: str | None = None,
+) -> list[dict[str, Any]]:
+    """Regeln, die Ziel, Ziel-Zone und Dienst enthalten – für die Frage "wer erreicht X?". Die Quellseite
+    bleibt offen und wird mitgeliefert. Reihenfolge wie im Regelwerk; für eine konkrete Quelle entscheidet
+    weiterhin die erste passende Regel."""
+    out: list[dict[str, Any]] = []
+    ordered = sorted((r for r in rules if r.get("enabled")), key=lambda r: r.get("position") or 0)
+    for rule in ordered:
+        if rule.get("policy_type") not in (None, "Network", "User"):
+            continue
+        checks = [
+            _zone_check("Ziel-Zone", rule.get("destination_zones") or [], dst_zone),
+            _net_check("Ziel", objs, rule.get("destination_networks") or [], dst, fqdn),
+            _svc_check(objs, rule.get("services") or [], svc),
+        ]
+        if rule.get("identities"):
+            checks.append(Check("Benutzer", "unknown", "nur für " + ", ".join(rule["identities"])))
+        if rule.get("schedule") not in _ANY_SCHEDULES:
+            checks.append(Check("Zeitplan", "unknown", str(rule.get("schedule"))))
+        results = [c.result for c in checks]
+        if "no" in results:
+            continue
+        out.append(
+            {
+                **_rule_ref(rule),
+                "certain": "unknown" not in results,
+                "checks": [c.__dict__ for c in checks],
+                "source_zones": rule.get("source_zones") or [],
+                "source_networks": rule.get("source_networks") or [],
+                "destination_zones": rule.get("destination_zones") or [],
+                "destination_networks": rule.get("destination_networks") or [],
+                "services": rule.get("services") or [],
+            }
+        )
+    return out
 
 
 def parse_service(text: str, objs_by_fw: list[Objects]) -> Service:

@@ -120,3 +120,35 @@ async def test_hostname_as_source():
     r = await call("EDV-PC01", "10.60.10.1", "smb")
     assert r["query"]["source"] == "10.50.10.21"
     assert any("EDV-PC01" in n or "edv-pc01" in n for n in r["notes"])
+
+
+async def test_reach_destination_lists_rules_on_all_firewalls():
+    r = await ts.troubleshoot(FakeDB(), None, destination="10.60.10.1")
+    assert r["mode"] == "reach" and r["anchor"]["name"] == "FW-Branch"
+    branch, hq = r["firewalls"]  # Standort-Firewall zuerst
+    assert (branch["name"], branch["zone"], branch["role"]) == ("FW-Branch", "LAN", "Standort des Ziels")
+    assert [x["name"] for x in branch["rules"]] == ["Filiale: nur HTTPS"]
+    assert branch["rules"][0]["source_zones"] == ["WG_Site2Site"] and branch["rules"][0]["certain"]
+    assert hq["zone"] == "WG_S2S" and hq["role"] == "Ausgang Richtung FW-Branch"
+    assert [x["name"] for x in hq["rules"]] == ["HQ nach Filiale"]
+    assert r["verdict"]["status"] == "allow"
+
+
+async def test_reach_destination_with_service_filters():
+    r = await ts.troubleshoot(FakeDB(), None, destination="10.60.10.1", service="smb")
+    branch, hq = r["firewalls"]
+    assert branch["rules"] == []  # HTTPS-Regel passt nicht zu SMB
+    assert [x["name"] for x in hq["rules"]] == ["HQ nach Filiale"]
+
+
+async def test_reach_internet_destination_uses_wan():
+    r = await ts.troubleshoot(FakeDB(), None, destination="8.8.8.8")
+    assert r["anchor"] is None and {f["zone"] for f in r["firewalls"]} == {"WAN"}
+    assert r["verdict"]["status"] == "deny"  # keine Regel Richtung WAN
+
+
+async def test_path_requires_service():
+    with pytest.raises(HTTPException):
+        await ts.troubleshoot(FakeDB(), None, source="10.50.10.5", destination="10.60.10.1")
+    with pytest.raises(HTTPException):
+        await ts.troubleshoot(FakeDB(), None, destination="  ")

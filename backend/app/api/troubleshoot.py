@@ -1,5 +1,8 @@
 """Fehlersuche: Würde eine Verbindung (Quelle, Ziel/Website, Dienst) über alle beteiligten Firewalls
-erlaubt? Simuliert das Regelwerk jeder Firewall auf dem Weg und gleicht mit den Logs ab."""
+erlaubt? Simuliert das Regelwerk jeder Firewall auf dem Weg und gleicht mit den Logs ab.
+
+Ohne Quelle wird stattdessen gesucht, welche Regeln auf allen Firewalls dieses Ziel enthalten:
+"Wer erreicht 1.2.3.4?"."""
 
 import ipaddress
 from typing import Annotated, Any
@@ -12,7 +15,7 @@ from app.api.hosts import resolve_name
 from app.models import ConfigObject
 from app.security import DB, CurrentUser
 from app.services.crosssite import detect_link_zone
-from app.services.policy_sim import Objects, Service, evaluate, parse_service
+from app.services.policy_sim import ANY_SERVICE, Objects, Service, evaluate, match_destination, parse_service
 from app.services.rules import summarize_rule
 
 router = APIRouter(prefix="/api", tags=["troubleshoot"])
@@ -64,19 +67,34 @@ def _zone_of(loc: tuple[int, dict] | None) -> str | None:
     return loc[1].get("zone") if loc else None
 
 
-@router.get("/troubleshoot")
-async def troubleshoot(
-    db: DB,
-    user: CurrentUser,
-    source: Annotated[str, Query(max_length=64)],
-    destination: Annotated[str, Query(max_length=255)],
-    service: Annotated[str, Query(max_length=64)],
-) -> dict:
-    src_ip, src_name, _ = await _resolve(db, source.strip(), "Quelle")
-    dst_ip, fqdn, resolved = await _resolve(db, destination.strip(), "Ziel")
+class _Config:
+    """Regelwerke, Objekte und Standort-Netze aller Firewalls."""
 
+    def __init__(self, firewalls: list, sites: dict[int, list[dict]], rows: list) -> None:
+        self.firewalls = firewalls
+        self.sites = sites
+        self.names = {fw.id: fw.name for fw in firewalls}
+        per_fw: dict[int, list[tuple[str, str, dict]]] = {}
+        self.rules: dict[int, list[dict[str, Any]]] = {}
+        for fw_id, entity, name, data, position in rows:
+            per_fw.setdefault(fw_id, []).append((entity, name, data))
+            if entity == "FirewallRule":
+                self.rules.setdefault(fw_id, []).append({**summarize_rule(data), "position": position})
+        self.objs = {fw.id: Objects(per_fw.get(fw.id, [])) for fw in firewalls}
+        self.link = {fw.id: detect_link_zone(per_fw.get(fw.id, []), fw.site_link_zone) for fw in firewalls}
+
+    def loc_dict(self, loc: tuple[int, dict] | None) -> dict | None:
+        if not loc:
+            return None
+        return {"firewall_id": loc[0], "name": self.names[loc[0]], "cidr": loc[1]["cidr"], "zone": loc[1].get("zone")}
+
+    def link_dict(self, fw_id: int) -> dict:
+        zone, source = self.link[fw_id]
+        return {"zone": zone, "source": source}
+
+
+async def _load(db: DB) -> _Config:
     firewalls, sites, _ = await load_sites(db)
-    names = {fw.id: fw.name for fw in firewalls}
     rows = (
         await db.execute(
             select(
@@ -90,21 +108,117 @@ async def troubleshoot(
             .order_by(ConfigObject.firewall_id, ConfigObject.position)
         )
     ).all()
-    per_fw: dict[int, list[tuple[str, str, dict]]] = {}
-    rules: dict[int, list[dict[str, Any]]] = {}
-    for fw_id, entity, name, data, position in rows:
-        per_fw.setdefault(fw_id, []).append((entity, name, data))
-        if entity == "FirewallRule":
-            rules.setdefault(fw_id, []).append({**summarize_rule(data), "position": position})
-    objs = {fw.id: Objects(per_fw.get(fw.id, [])) for fw in firewalls}
-    try:
-        svc: Service = parse_service(service, list(objs.values()))
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return _Config(firewalls, sites, rows)
+
+
+@router.get("/troubleshoot")
+async def troubleshoot(
+    db: DB,
+    user: CurrentUser,
+    destination: Annotated[str, Query(max_length=255)],
+    source: Annotated[str | None, Query(max_length=64)] = None,
+    service: Annotated[str | None, Query(max_length=64)] = None,
+) -> dict:
+    source = (source or "").strip()
+    destination = destination.strip()
+    service = (service or "").strip()
+    if not destination:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ziel angeben")
+    cfg = await _load(db)
+    if service:
+        try:
+            svc: Service = parse_service(service, list(cfg.objs.values()))
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    elif source:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dienst angeben – z.B. https, 443, tcp/3389 oder ping")
+    else:
+        svc = ANY_SERVICE
+
+    if source:
+        return await _path(db, user, cfg, source, destination, svc)
+    ip, name, resolved = await _resolve(db, destination, "Ziel")
+    return _reach(cfg, destination, ip, name, resolved, svc)
+
+
+def _reach(cfg: _Config, given: str, ip: str, name: str | None, resolved: list[str], svc: Service) -> dict:
+    """Wer erreicht das Ziel? Alle Regeln aller Firewalls, die das Ziel (und den Dienst) enthalten."""
+    loc = _locate(cfg.sites, ip)
+    notes: list[str] = []
+    if name:
+        notes.append(f"{name} aufgelöst zu {', '.join(resolved)} – geprüft mit {ip}.")
+    if loc is None:
+        notes.append("Ziel liegt in keinem bekannten Standort-Netz – geprüft als Ausgang ins Internet (Zone WAN).")
+    elif len(cfg.firewalls) > 1:
+        notes.append(
+            "Quellen an anderen Standorten brauchen zusätzlich eine Regel auf ihrer eigenen Firewall "
+            "Richtung Tunnel – siehe die weiteren Firewalls."
+        )
+    notes.append(
+        "Für eine konkrete Gegenstelle entscheidet die erste passende Regel – eine frühere Drop-Regel kann "
+        "spätere Erlaubnisse verdecken. Benutzerregeln und Zeitpläne gelten als unsicher."
+    )
+
+    firewalls = []
+    for fw in cfg.firewalls:
+        if loc is not None and fw.id == loc[0]:
+            zone, role = _zone_of(loc), "Standort des Ziels"
+        elif loc is None:
+            zone, role = "WAN", "Ausgang ins Internet"
+        else:
+            zone, role = cfg.link[fw.id][0], f"Ausgang Richtung {cfg.names[loc[0]]}"
+        rules = match_destination(cfg.rules.get(fw.id, []), cfg.objs[fw.id], ipaddress.ip_address(ip), svc, zone, name)
+        firewalls.append(
+            {
+                "firewall_id": fw.id,
+                "name": fw.name,
+                "role": role,
+                "zone": zone,
+                "link_zone": cfg.link_dict(fw.id),
+                "rules": rules,
+                "rule_count": len(cfg.rules.get(fw.id, [])),
+            }
+        )
+    # Firewall des Standorts zuerst
+    firewalls.sort(key=lambda f: 0 if loc and f["firewall_id"] == loc[0] else 1)
+
+    allowing = sum(1 for f in firewalls for r in f["rules"] if r["action"] == "Accept")
+    total = sum(len(f["rules"]) for f in firewalls)
+    what = f"zu {name or ip}"
+    if total == 0:
+        verdict = {"status": "deny", "text": f"Keine aktive Regel auf einer Firewall enthält Verbindungen {what}."}
+    elif allowing == 0:
+        verdict = {"status": "deny", "text": f"{total} passende Regel(n), aber keine erlaubt Verbindungen {what}."}
+    else:
+        verdict = {
+            "status": "allow",
+            "text": f"{allowing} erlaubende Regel(n) auf "
+            + ", ".join(f["name"] for f in firewalls if any(r["action"] == "Accept" for r in f["rules"]))
+            + f" enthalten Verbindungen {what} ({svc.label}).",
+        }
+    return {
+        "mode": "reach",
+        "query": {
+            "given": given,
+            "ip": ip,
+            "name": name,
+            "resolved": resolved,
+            "service": {"protocol": svc.protocol, "port": svc.port, "label": svc.label},
+        },
+        "anchor": cfg.loc_dict(loc),
+        "firewalls": firewalls,
+        "verdict": verdict,
+        "notes": notes,
+    }
+
+
+async def _path(db: DB, user: CurrentUser, cfg: _Config, source: str, destination: str, svc: Service) -> dict:
+    src_ip, src_name, _ = await _resolve(db, source, "Quelle")
+    dst_ip, fqdn, resolved = await _resolve(db, destination, "Ziel")
+    names, sites, rules, objs, link = cfg.names, cfg.sites, cfg.rules, cfg.objs, cfg.link
 
     src_loc, dst_loc = _locate(sites, src_ip), _locate(sites, dst_ip)
     notes: list[str] = []
-    link = {fw.id: detect_link_zone(per_fw.get(fw.id, []), fw.site_link_zone) for fw in firewalls}
 
     # Weg: welche Firewall sieht die Verbindung mit welchen Zonen
     hops: list[tuple[int, str | None, str | None, str]] = []  # (fw, Quell-Zone, Ziel-Zone, Rolle)
@@ -148,7 +262,6 @@ async def troubleshoot(
             dst_zone,
             fqdn,
         )
-        link_zone, link_source = link[fw_id]
         results.append(
             {
                 "firewall_id": fw_id,
@@ -156,7 +269,7 @@ async def troubleshoot(
                 "role": role,
                 "src_zone": src_zone,
                 "dst_zone": dst_zone,
-                "link_zone": {"zone": link_zone, "source": link_source},
+                "link_zone": cfg.link_dict(fw_id),
                 "decision": ev.decision,
                 "rule": ev.rule,
                 "checks": [c.__dict__ for c in ev.checks],
@@ -198,12 +311,8 @@ async def troubleshoot(
             hours=24,
         )
 
-    def loc_dict(loc: tuple[int, dict] | None) -> dict | None:
-        if not loc:
-            return None
-        return {"firewall_id": loc[0], "name": names[loc[0]], "cidr": loc[1]["cidr"], "zone": loc[1].get("zone")}
-
     return {
+        "mode": "path",
         "query": {
             "source": src_ip,
             "destination": destination,
@@ -212,8 +321,8 @@ async def troubleshoot(
             "resolved": resolved,
             "service": {"protocol": svc.protocol, "port": svc.port, "label": svc.label},
         },
-        "src": loc_dict(src_loc),
-        "dst": loc_dict(dst_loc),
+        "src": cfg.loc_dict(src_loc),
+        "dst": cfg.loc_dict(dst_loc),
         "hops": results,
         "verdict": verdict,
         "notes": notes,

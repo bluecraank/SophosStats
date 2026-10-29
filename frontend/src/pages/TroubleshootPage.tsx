@@ -20,6 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { HostInput } from "@/components/HostInput";
 import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -54,15 +55,52 @@ interface Loc {
   cidr: string;
   zone: string | null;
 }
+interface ServiceRef {
+  label: string;
+  protocol: string;
+  port: number | null;
+}
+interface Verdict {
+  status: "allow" | "deny" | "unknown";
+  text: string;
+}
 interface Response {
-  query: { source: string; destination: string; dst_ip: string; fqdn: string | null; resolved: string[]; service: { label: string; protocol: string; port: number | null } };
+  mode: "path";
+  query: { source: string; destination: string; dst_ip: string; fqdn: string | null; resolved: string[]; service: ServiceRef };
   src: Loc | null;
   dst: Loc | null;
   hops: Hop[];
-  verdict: { status: "allow" | "deny" | "unknown"; text: string };
+  verdict: Verdict;
   notes: string[];
   observed: { verdict: { status: string; text: string } } | null;
 }
+interface ReachRule extends RuleRef {
+  certain: boolean;
+  checks: Check[];
+  source_zones: string[];
+  source_networks: string[];
+  destination_zones: string[];
+  destination_networks: string[];
+  services: string[];
+}
+interface ReachFirewall {
+  firewall_id: number;
+  name: string;
+  role: string;
+  zone: string | null;
+  link_zone: { zone: string | null; source: string };
+  rules: ReachRule[];
+  rule_count: number;
+}
+interface ReachResponse {
+  mode: "reach";
+  query: { given: string; ip: string; name: string | null; resolved: string[]; service: ServiceRef };
+  anchor: Loc | null;
+  firewalls: ReachFirewall[];
+  verdict: Verdict;
+  notes: string[];
+}
+type Answer = Response | ReachResponse;
 
 const DECISION: Record<Hop["decision"], { label: string; icon: LucideIcon; cls: string; border: string }> = {
   allow: { label: "erlaubt", icon: CircleCheck, cls: "border-good/40 bg-good/10 text-good", border: "border-good/50" },
@@ -73,6 +111,11 @@ const VERDICT = {
   allow: { title: "Verbindung wäre erlaubt", cls: "border-good/40 bg-good/5 [&>svg]:text-good", icon: CircleCheck },
   deny: { title: "Verbindung würde blockiert", cls: "border-critical/40 bg-critical/5 [&>svg]:text-critical", icon: CircleX },
   unknown: { title: "Nicht eindeutig bestimmbar", cls: "border-warning/40 bg-warning/5 [&>svg]:text-warning", icon: CircleHelp },
+};
+const REACH_TITLE = {
+  allow: "Erlaubende Regeln gefunden",
+  deny: "Keine erlaubende Regel",
+  unknown: "Nicht eindeutig bestimmbar",
 };
 const MARK: Record<Result, { icon: LucideIcon; cls: string }> = {
   yes: { icon: CircleCheck, cls: "text-good" },
@@ -191,14 +234,114 @@ function HopDetails({ h }: { h: Hop }) {
   );
 }
 
+function Names({ items }: { items: string[] }) {
+  if (items.length === 0) return <span className="text-muted-foreground">Alle</span>;
+  return <span className="break-words">{items.join(", ")}</span>;
+}
+
+/** Wer erreicht das Ziel? Regeln je Firewall, die das Ziel enthalten – mit offener Quellseite. */
+function ReachResult({ r }: { r: ReachResponse }) {
+  const v = VERDICT[r.verdict.status];
+  return (
+    <div className="space-y-4">
+      <Alert className={v.cls}>
+        <v.icon />
+        <AlertTitle>{REACH_TITLE[r.verdict.status]}</AlertTitle>
+        <AlertDescription>{r.verdict.text}</AlertDescription>
+      </Alert>
+
+      <div className="flex items-center gap-3 overflow-x-auto pb-2">
+        <div className="flex w-48 shrink-0 flex-col items-center gap-1 rounded-xl border border-dashed bg-card px-3 py-3 text-center">
+          <Monitor className="size-5 text-muted-foreground" />
+          <div className="text-[11px] text-muted-foreground uppercase">Quelle</div>
+          <div className="text-sm font-medium">beliebig</div>
+          <div className="text-xs text-muted-foreground">laut Regeln unten</div>
+        </div>
+        <ArrowRight className="size-5 shrink-0 text-muted-foreground" />
+        <Endpoint label={`Ziel · ${r.query.service.label}`} value={r.query.name ?? r.query.ip} loc={r.anchor} icon={r.query.name ? Globe : Monitor} />
+      </div>
+
+      {r.notes.length > 0 && (
+        <ul className="space-y-1 text-xs text-muted-foreground">
+          {r.notes.map((n) => (
+            <li key={n} className="flex gap-2"><Info className="mt-0.5 size-3.5 shrink-0" />{n}</li>
+          ))}
+        </ul>
+      )}
+
+      {r.firewalls.map((fw) => {
+        const linkInfo = fw.role.startsWith("Ausgang Richtung");
+        return (
+          <Card key={fw.firewall_id} title={`${fw.name} – ${fw.role}`} icon={Server}>
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Geprüft als Ziel-Zone <strong className="text-foreground">{fw.zone ?? "unbekannt"}</strong>
+                {linkInfo && <> (Tunnel-Zone zu anderen Standorten, {fw.link_zone.source})</>}.
+                {linkInfo && !fw.link_zone.zone && " Unter Firewalls verwalten → „Zone zu anderen Standorten“ festlegen."}
+              </p>
+              {fw.rules.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Keine aktive Regel auf {fw.name} enthält dieses Ziel ({fw.rule_count} Regel{fw.rule_count === 1 ? "" : "n"} geprüft).
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-10">#</TableHead>
+                        <TableHead>Regel</TableHead>
+                        <TableHead>Aktion</TableHead>
+                        <TableHead>Quell-Zonen</TableHead>
+                        <TableHead>Quell-Netze</TableHead>
+                        <TableHead>Dienste</TableHead>
+                        <TableHead>Treffer auf Zielseite</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {fw.rules.map((rule) => (
+                        <TableRow key={rule.position}>
+                          <TableCell className="text-muted-foreground">{rule.position + 1}</TableCell>
+                          <TableCell className="font-medium">
+                            <Link className="hover:underline" to={`/firewalls/${fw.firewall_id}?tab=rules&rq=${encodeURIComponent(rule.name)}`}>
+                              {rule.name}
+                            </Link>
+                          </TableCell>
+                          <TableCell><Pill tone={rule.action === "Accept" ? "good" : "critical"}>{rule.action ?? "–"}</Pill></TableCell>
+                          <TableCell><Names items={rule.source_zones} /></TableCell>
+                          <TableCell className="max-w-64"><Names items={rule.source_networks} /></TableCell>
+                          <TableCell className="max-w-48"><Names items={rule.services} /></TableCell>
+                          <TableCell className="min-w-56">
+                            {rule.certain ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-good">
+                                <CircleCheck className="size-3.5" /> sicher
+                              </span>
+                            ) : (
+                              <Checks checks={rule.checks.filter((c) => c.result !== "yes")} />
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 function Result({ p }: { p: { source: string; destination: string; service: string } }) {
   const q = useQuery({
     queryKey: ["troubleshoot", p],
-    queryFn: () => api<Response>("/api/troubleshoot", { params: p }),
+    queryFn: () => api<Answer>("/api/troubleshoot", { params: p }),
     staleTime: 60_000,
   });
   if (q.isPending) return <Loading />;
   if (q.error) return <ErrorBox error={q.error} />;
+  if (q.data.mode === "reach") return <ReachResult r={q.data} />;
   const r = q.data;
   const v = VERDICT[r.verdict.status];
   const traceUrl = `/cross-site?${new URLSearchParams({
@@ -256,17 +399,21 @@ function Result({ p }: { p: { source: string; destination: string; service: stri
 const EXAMPLES = [
   { source: "10.50.10.5", destination: "10.60.10.1", service: "smb" },
   { source: "10.50.10.5", destination: "www.example.com", service: "https" },
+  { source: "", destination: "10.60.10.1", service: "" },
 ];
 
 export function TroubleshootPage() {
   const [params, setParams] = useSearchParams();
-  const current = params.get("source") && params.get("destination") && params.get("service")
-    ? { source: params.get("source")!, destination: params.get("destination")!, service: params.get("service")! }
+  const current = params.get("destination")
+    ? { source: params.get("source") ?? "", destination: params.get("destination")!, service: params.get("service") ?? "" }
     : null;
   const [form, setForm] = useState(current ?? { source: "", destination: "", service: "" });
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    setParams({ source: form.source.trim(), destination: form.destination.trim(), service: form.service.trim() });
+    const next: Record<string, string> = { destination: form.destination.trim() };
+    if (form.source.trim()) next.source = form.source.trim();
+    if (form.service.trim()) next.service = form.service.trim();
+    setParams(next);
   };
 
   return (
@@ -275,11 +422,11 @@ export function TroubleshootPage() {
         title="Fehlersuche"
         description="Prüft anhand der Regelwerke aller beteiligten Firewalls, ob eine Verbindung erlaubt wäre – und woran es scheitert."
       />
-      <Card title="Verbindung prüfen" icon={Stethoscope}>
+      <Card title="Verbindung prüfen" icon={Stethoscope} className="overflow-visible">
         <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
           <label className="space-y-1">
-            <span className="label">Quelle (IP oder Hostname)</span>
-            <HostInput className="w-56" placeholder="10.50.10.5 oder EDV-" value={form.source} onChange={(v) => setForm({ ...form, source: v })} onPick={(h) => setForm({ ...form, source: h.ip })} required />
+            <span className="label">Quelle (IP oder Hostname, optional)</span>
+            <HostInput className="w-56" placeholder="10.50.10.5 oder EDV-" value={form.source} onChange={(v) => setForm({ ...form, source: v })} onPick={(h) => setForm({ ...form, source: h.ip })} />
           </label>
           <ArrowRight className="mb-2.5 size-4 text-muted-foreground" />
           <label className="space-y-1">
@@ -287,17 +434,20 @@ export function TroubleshootPage() {
             <HostInput className="w-64" placeholder="10.60.10.1, Hostname oder Website" value={form.destination} onChange={(v) => setForm({ ...form, destination: v })} onPick={(h) => setForm({ ...form, destination: h.ip })} required />
           </label>
           <label className="space-y-1">
-            <span className="label">Dienst</span>
-            <Input className="w-44 font-mono" placeholder="https, 443, tcp/3389, ping" value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value })} required />
+            <span className="label">Dienst{form.source.trim() ? "" : " (optional)"}</span>
+            <Input className="w-44 font-mono" placeholder="https, 443, tcp/3389, ping" value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value })} required={!!form.source.trim()} />
           </label>
           <Button><SearchCheck /> Prüfen</Button>
         </form>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Ohne Quelle wird gezeigt, welche Regeln auf allen Firewalls das Ziel enthalten – also wer es erreichen kann.
+        </p>
         {!current && (
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             Beispiele:
             {EXAMPLES.map((ex) => (
-              <button key={ex.destination} type="button" className="rounded border px-2 py-0.5 font-mono hover:bg-muted" onClick={() => setForm(ex)}>
-                {ex.source} → {ex.destination} ({ex.service})
+              <button key={`${ex.source}>${ex.destination}`} type="button" className="rounded border px-2 py-0.5 font-mono hover:bg-muted" onClick={() => setForm(ex)}>
+                {ex.source ? `${ex.source} → ${ex.destination} (${ex.service})` : `Wer erreicht ${ex.destination}?`}
               </button>
             ))}
           </div>

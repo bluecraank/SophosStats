@@ -366,7 +366,7 @@ export function CrossSitePage() {
         title="Standortübergreifend"
         description="Verbindungen über mehrere Firewalls verfolgen – wo wird blockiert, wo fehlt die Regel?"
       />
-      <Card title="Pfad verfolgen" icon={Route}>
+      <Card title="Pfad verfolgen" icon={Route} className="overflow-visible">
         <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
           <HostInput className="w-52" placeholder="Quell-IP oder Hostname" value={form.src} onChange={(v) => setForm({ ...form, src: v })} onPick={(h) => setForm({ ...form, src: h.ip })} required />
           <ArrowRight className="mb-2.5 size-4 text-muted-foreground" />
