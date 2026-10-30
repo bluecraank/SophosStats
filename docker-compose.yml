@@ -65,8 +65,10 @@ services:
       # false: nie auf HTTPS weiterleiten (hinter einem Reverse Proxy mit X-Forwarded-Proto: https entfällt sie automatisch)
       HTTPS_REDIRECT: ${HTTPS_REDIRECT:-true}
     ports:
-      - "${HTTP_PORT:-80}:80"
-      - "${HTTPS_PORT:-443}:443"
+      # WEB_BIND=127.0.0.1: nur vom Docker-Host selbst erreichbar (z. B. für einen Reverse Proxy auf demselben Host).
+      # Hinweis: Von Docker veröffentlichte Ports umgehen ufw – eine ufw-Regel sperrt sie nicht.
+      - "${WEB_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80"
+      - "${WEB_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443"
     volumes:
       # Ohne eigenes Zertifikat wird beim ersten Start ein selbstsigniertes erzeugt.
       # Eigenes Zertifikat: tls.crt + tls.key in dieses Volume legen und den Container neu starten.

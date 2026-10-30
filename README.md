@@ -190,8 +190,10 @@ location / {
 }
 ```
 
-Port 443 des Containers kann dann unveröffentlicht bleiben (`HTTPS_PORT` auf einen freien Port setzen oder das
-Port-Mapping entfernen).
+Läuft der Proxy auf demselben Host, `WEB_BIND=127.0.0.1` setzen: Dann sind die Ports des Web-Containers nur noch
+lokal erreichbar. Das ist nötig, weil Docker veröffentlichte Ports an **ufw vorbei** freigibt (eigene iptables-Regeln
+in der `DOCKER`-Kette) – eine ufw-Regel sperrt sie nicht. Port 443 des Containers kann dann unveröffentlicht bleiben
+(`HTTPS_PORT` auf einen freien Port setzen oder das Port-Mapping entfernen).
 
 ---
 
@@ -216,6 +218,7 @@ Alle Einstellungen sind Umgebungsvariablen. Lokal kommen sie aus der `.env`, in 
 | `INITIAL_ADMIN_USERNAME` | | `admin` | Erster Admin, wird nur angelegt, solange es keine Benutzer gibt |
 | `INITIAL_ADMIN_PASSWORD` | beim ersten Start | – | Passwort des ersten Admins |
 | `HTTPS_PORT` / `HTTP_PORT` | | `443` / `80` | Ports auf dem Host, auch für die HTTP→HTTPS-Weiterleitung |
+| `WEB_BIND` | | `0.0.0.0` | Adresse der Web-Ports auf dem Host; `127.0.0.1` = nur lokal (Reverse Proxy auf demselben Host) |
 | `HTTPS_REDIRECT` | | `true` | `false`: nie auf HTTPS weiterleiten. Hinter einem Reverse Proxy, der `X-Forwarded-Proto: https` mitschickt, nicht nötig |
 | `SESSION_TTL_HOURS` | | `12` | Gültigkeit einer Anmeldung |
 | `RETENTION_METRICS_DAYS` | | `90` | Aufbewahrung von CPU/RAM/Interface-Werten |
@@ -306,6 +309,7 @@ erfordern eine Anmeldung.
 | Portainer: *„.env not found“* | Variablen unter *Environment variables* des Stacks setzen, eine `.env`-Datei wird nicht benötigt |
 | Container `db` ist *unhealthy* | `docker logs <db-container>` prüfen. Nach einem fehlgeschlagenen Erst-Start das Volume `db-data` löschen und neu deployen. |
 | HTTP-Weiterleitung landet auf falschem Port | `HTTPS_PORT` auf den tatsächlich genutzten Port setzen |
+| Web-Ports trotz ufw-Sperre von außen erreichbar | Docker umgeht ufw. `WEB_BIND=127.0.0.1` setzen oder die Ports gar nicht veröffentlichen |
 | Hinter Reverse Proxy: Weiterleitungsschleife oder Sprung auf `https://…:443` | Web-Image neu bauen (`docker compose up -d --build web`), am Proxy `proxy_set_header X-Forwarded-Proto $scheme;` setzen oder `HTTPS_REDIRECT=false`. Prüfen mit `curl -sI -H 'X-Forwarded-Proto: https' http://<docker-host>:<HTTP_PORT>/` – muss `200` liefern, nicht `301`. Browser merken sich 301-Antworten: danach einmal Cache leeren oder privates Fenster. |
 | *„599 You do not have permission“* | Dem Admin-Profil des API-Benutzers Leserechte für den genannten Bereich geben |
 | Keine Regelnutzung / „nie genutzt“ | *Log firewall traffic* in den Regeln aktivieren und prüfen, ob Syslog ankommt (Status „Syslog“ in der Übersicht) |
