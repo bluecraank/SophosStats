@@ -62,7 +62,7 @@ services:
     environment:
       # Für die HTTP->HTTPS-Weiterleitung: Port, unter dem HTTPS von außen erreichbar ist
       HTTPS_PORT: ${HTTPS_PORT:-443}
-      # false: kein 301 auf HTTPS – wenn ein eigener Reverse Proxy davor TLS übernimmt und per HTTP weiterreicht
+      # false: nie auf HTTPS weiterleiten (hinter einem Reverse Proxy mit X-Forwarded-Proto: https entfällt sie automatisch)
       HTTPS_REDIRECT: ${HTTPS_REDIRECT:-true}
     ports:
       - "${HTTP_PORT:-80}:80"

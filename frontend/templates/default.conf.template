@@ -7,14 +7,20 @@ map $http_x_forwarded_proto $forwarded_proto {
     default $http_x_forwarded_proto;
 }
 
+# Weiterleitung auf HTTPS (1) oder nicht (0). Entfällt, wenn
+#  - HTTPS_REDIRECT=false gesetzt ist, oder
+#  - die Anfrage schon per HTTPS über einen vorgeschalteten Reverse Proxy kam (X-Forwarded-Proto: https).
+map "${HTTPS_REDIRECT}:$http_x_forwarded_proto" $https_redirect {
+    default     1;
+    "~*^false:" 0;
+    "~*:https$" 0;
+}
+
 server {
     listen 80;
     server_name _;
 
-    # HTTPS_REDIRECT=false: kein 301 auf HTTPS, Port 80 liefert die Anwendung direkt aus
-    # (TLS übernimmt ein eigener Reverse Proxy davor)
-    set $https_redirect "${HTTPS_REDIRECT}";
-    if ($https_redirect != "false") {
+    if ($https_redirect) {
         return 301 https://$host:${HTTPS_PORT}$request_uri;
     }
 
